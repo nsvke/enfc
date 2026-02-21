@@ -1,0 +1,19 @@
+[package]
+name = "enfc"
+version = "0.1.0"
+repository = "https://github.com/enesscevik/enfc"
+description = "A toy compiler for the ENFC language, written in Rust for learning purposes."
+license = "MIT"
+edition = "2024"
+
+[features]
+default = ["miette"]
+miette = ["dep:miette"]
+
+[dependencies]
+anstream = "0.6.21"
+anstyle = "1.0.13"
+clap = "4.5.51"
+miette = {version = "7.6.0", features = ["fancy"], optional = true }
+phf = {version = "0.13.1", features = ["macros"] }
+thiserror = { version = "2.0.17" }
