@@ -1,8 +1,8 @@
 [package]
 name = "enfc"
 version = "0.1.0"
-repository = "https://github.com/enesscevik/enfc"
-description = "A toy compiler for the ENFC language, written in Rust for learning purposes."
+repository = "https://github.com/nsvke/enfc"
+description = "An experimental, statically typed language compiler exploring hand-written recursive descent parsing ad custom ir design."
 license = "MIT"
 edition = "2024"
 

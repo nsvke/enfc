@@ -6,32 +6,64 @@ use crate::driver::parser::{
     BinaryOperator, IdentLiteralNode, LiteralNode, Statement, UnaryOperator,
 };
 use crate::structs::Span;
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Type {
+pub struct Type {
+    pub span: Span,
+    pub kind: TypeKind,
+}
+
+impl Type {
+    fn eq(&self, t: &Type) -> bool {
+        t.kind == self.kind
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeKind {
     Int,
     Str,
     Bool,
     Char,
-    Void,
+    Nret,
     Error,
 }
 
+impl IdentLiteralNode {
+    fn to_type(&self) -> Type {
+        let kind = match self.value.as_str() {
+            "int" => TypeKind::Int,
+            "str" => TypeKind::Str,
+            "bool" => TypeKind::Bool,
+            "chr" => TypeKind::Char,
+            "nret" => TypeKind::Nret,
+            "err" => TypeKind::Error,
+            _ => unreachable!(), // TODO check wrong types
+        };
+        Type {
+            span: self.span,
+            kind,
+        }
+    }
+}
+#[derive(Debug)]
 enum Symbol {
     Var(VarInfo),
     Fun(FunInfo),
 }
 
+#[derive(Debug)]
 struct VarInfo {
-    name: String,
+    // name: String,
     typ: Type,
     mutable: bool,
 }
 
+#[derive(Debug)]
 struct FunInfo {
-    name: String,
-    params: Vec<(String, Type)>, // (param_name, param_type)
+    // name: String,
+    params: Vec<(IdentLiteralNode, Type)>, // (param_name, param_type)
     ret_type: Type,
     span: Span,
 }
@@ -66,10 +98,27 @@ impl<'a> SemanticAnalyzer<'a> {
     }
 
     fn collect_signatures(&mut self) {
-        // iter on statements
-        // if it is a function node
-        // add it's signature
-        // continue
+        for stmt in self.statements {
+            match stmt {
+                Statement::FunDefinition(node) => {
+                    match self.scopes[0].entry(node.name.value.clone()) {
+                        Entry::Occupied(_) => {} // TODO redefination handle
+                        Entry::Vacant(entry) => {
+                            entry.insert(Symbol::Fun(FunInfo {
+                                params: node
+                                    .parameters
+                                    .iter()
+                                    .map(|(name, typ)| (name.clone(), typ.to_type()))
+                                    .collect(),
+                                ret_type: node.ret_type.to_type(),
+                                span: node.span,
+                            }));
+                        }
+                    };
+                }
+                _ => {}
+            };
+        }
     }
 }
 

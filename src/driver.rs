@@ -1,7 +1,6 @@
 mod lexer;
 mod parser;
 mod semantic_analyzer;
-// mod ir_gen;
 
 pub use lexer::{Token, TokenKind};
 

@@ -841,11 +841,11 @@ impl fmt::Debug for BlockNode {
 }
 
 pub(crate) struct FunDefNode {
-    name: IdentLiteralNode,
-    parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
-    ret_type: IdentLiteralNode,
-    body: BlockNode,
-    span: Span,
+    pub name: IdentLiteralNode,
+    pub parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
+    pub ret_type: IdentLiteralNode,
+    pub body: BlockNode,
+    pub span: Span,
 }
 impl fmt::Debug for FunDefNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1234,6 +1234,7 @@ pub(crate) enum LiteralValue {
     Null,
 }
 
+#[derive(Clone)]
 pub(crate) struct IdentLiteralNode {
     pub value: String,
     pub span: Span,
