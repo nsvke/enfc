@@ -3,13 +3,13 @@
 use crate::compile_error::CompileError;
 use crate::diagnostic::Diagnostics;
 use crate::driver::parser::{
-    BinaryOperator, IdentLiteralNode, LiteralNode, Statement, UnaryOperator,
+    BinaryOperator, Expression, IdentLiteralNode, LiteralNode, Statement, UnaryOperator,
 };
 use crate::structs::Span;
 use std::collections::{HashMap, hash_map::Entry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Type {
+pub(crate) struct Type {
     pub span: Span,
     pub kind: TypeKind,
 }
@@ -21,7 +21,7 @@ impl Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeKind {
+pub(crate) enum TypeKind {
     Int,
     Str,
     Bool,
@@ -56,6 +56,7 @@ pub(crate) struct SemanticAnalyzer<'a> {
     statements: &'a [Statement],
     scopes: Vec<HashMap<String, Symbol>>,
     diagnose: &'a mut Diagnostics,
+    destruct: bool,
 }
 
 impl<'a> SemanticAnalyzer<'a> {
@@ -64,14 +65,25 @@ impl<'a> SemanticAnalyzer<'a> {
             statements,
             scopes: vec![HashMap::new()],
             diagnose,
+            destruct: false,
         }
     }
-    pub(crate) fn analyze(&mut self) -> Vec<TypedStatement> {
+    pub(crate) fn analyze(&mut self) -> Result<Vec<TypedStatement>, Vec<TypedStatement>> {
+        let v = self.analyze_and_collect();
+        if !self.destruct {
+            if !v.is_empty() { Ok(v) } else { Err(v) }
+        } else {
+            Err(v)
+        }
+    }
+
+    fn analyze_and_collect(&mut self) -> Vec<TypedStatement> {
+        let mut typed_statements = Vec::new();
         self.collect_signatures();
         for stmt in self.statements {
             //
         }
-        Vec::new()
+        typed_statements
     }
 
     fn enter_scope(&mut self) {
@@ -89,6 +101,7 @@ impl<'a> SemanticAnalyzer<'a> {
             "chr" => TypeKind::Char,
             "nret" => TypeKind::Nret,
             val => {
+                self.destruct = true;
                 self.diagnose
                     .push_error(CompileError::unknown_type(val.into(), typ.span));
                 TypeKind::Error
@@ -97,6 +110,23 @@ impl<'a> SemanticAnalyzer<'a> {
         Type {
             span: typ.span,
             kind,
+        }
+    }
+
+    fn broken_typed_statement(&mut self, span: Span) -> TypedStatement {
+        self.destruct = true;
+        TypedStatement {
+            kind: TypedStatementKind::Broken,
+            span,
+        }
+    }
+
+    fn broken_typed_expr(&mut self, span: Span) -> TypedExpression {
+        self.destruct = true;
+        TypedExpression {
+            kind: TypedExpressionKind::Broken,
+            typ: TypeKind::Error,
+            span,
         }
     }
 
@@ -113,6 +143,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     let ret_typ = self.resolve_types(&node.ret_type);
                     match self.scopes[0].entry(node.name.value.clone()) {
                         Entry::Occupied(occupied_entry) => {
+                            self.destruct = true;
                             self.diagnose.push_error(CompileError::symbol_redefination(
                                 node.name.value.clone(),
                                 match occupied_entry.get() {
@@ -136,10 +167,32 @@ impl<'a> SemanticAnalyzer<'a> {
             };
         }
     }
-}
 
+    fn analyze_expression(&mut self, expr: &Expression) -> TypedExpression {
+        match expr {
+            Expression::Binary(exp) => {}
+            Expression::Unary(exp) => {}
+            Expression::Literal(exp) => {}
+            Expression::Ident(exp) => {}
+            Expression::Call(exp) => {}
+            Expression::Index(exp) => {}
+            Expression::FieldAccess(exp) => {}
+            Expression::Broken(span) => {
+                self.destruct = true;
+                // self.broken_typed_expr(span)
+            }
+        };
+
+        self.broken_typed_expr(Span::default()) // mock return
+    }
+}
 #[derive(Debug)]
-pub(crate) enum TypedStatement {
+pub(crate) struct TypedStatement {
+    kind: TypedStatementKind,
+    span: Span,
+}
+#[derive(Debug)]
+pub(crate) enum TypedStatementKind {
     VarDeclaration(TypedVarDecNode),
     Assignment(TypedAssignmentNode),
     If(TypedIfNode),
@@ -148,13 +201,12 @@ pub(crate) enum TypedStatement {
     Block(TypedBlockNode),
     Expression(TypedExpression),
     Return(TypedReturnNode),
-    Broken(Span),
+    Broken,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedBlockNode {
     body: Vec<TypedStatement>,
-    span: Span,
 }
 
 #[derive(Debug)]
@@ -163,7 +215,6 @@ pub(crate) struct TypedFunDefNode {
     parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
     ret_type: Type,
     body: TypedBlockNode,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedIfNode {
@@ -171,19 +222,16 @@ pub(crate) struct TypedIfNode {
     then_branch: TypedBlockNode,
     else_if_branches: Vec<TypedElseIfNode>,
     else_branch: Option<TypedBlockNode>,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedElseIfNode {
     condition: TypedExpression,
     then_branch: TypedBlockNode,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedWhileNode {
     condition: TypedExpression,
     body: TypedBlockNode,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedVarDecNode {
@@ -191,19 +239,17 @@ pub(crate) struct TypedVarDecNode {
     var_type: Type,
     initalizer: TypedExpression,
     mutable: bool,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedAssignmentNode {
     left: IdentLiteralNode,
     right: TypedExpression,
-    span: Span,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedExpression {
     kind: TypedExpressionKind,
-    typ: Type,
+    typ: TypeKind,
     span: Span,
 }
 
@@ -216,44 +262,38 @@ pub(crate) enum TypedExpressionKind {
     Call(TypedCallNode),
     Index(TypedIndexExpressionNode),
     FieldAccess(TypedFieldAccessNode),
-    Broken(Span),
+    Broken,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedIndexExpressionNode {
     target: Box<TypedExpression>,
     index: Box<TypedExpression>,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedFieldAccessNode {
     target: Box<TypedExpression>,
     field: IdentLiteralNode,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedBinaryExpressionNode {
     left: Box<TypedExpression>,
     op: BinaryOperator,
     right: Box<TypedExpression>,
-    span: Span,
 }
 #[derive(Debug)]
 pub(crate) struct TypedUnaryExpressionNode {
     operator: UnaryOperator,
     operand: Box<TypedExpression>,
-    span: Span,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedCallNode {
     primary: Box<TypedExpression>,
     arguments: Vec<TypedExpression>,
-    span: Span,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedReturnNode {
     value: TypedExpression,
-    span: Span,
 }

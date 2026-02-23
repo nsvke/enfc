@@ -76,6 +76,9 @@ impl<'a> Parser<'a> {
         }
         statements
     }
+
+    //TODO add parse_expression_statement()
+
     fn parse_statement(&mut self) -> Option<Statement> {
         match self.peek().kind {
             Val | Var => Some(self.parse_val()),
@@ -86,14 +89,23 @@ impl<'a> Parser<'a> {
             Ret => Some(self.parse_ret()),
             Ident(_) => match self.peek_at(1).kind {
                 Eq => Some(self.parse_asgn()),
-                _ => Some(Statement::Expression(self.parse_expr())),
+                OpenParam => Some(Statement::Expression(self.parse_expr())),
+                _ => {
+                    self.diagnose.push_error(CompileError::unexpected_token(
+                        Any,
+                        self.peek().kind.clone(),
+                        self.peek().span,
+                    ));
+                    self.consume_quietly();
+                    Some(self.sync())
+                } //_ => Some(Statement::Expression(self.parse_expr())),
             },
             Semi | Eof => {
                 self.consume_quietly();
                 None
             }
             _ => {
-                // Simdilik diger tokenlari gormezden geliyor
+                // ignore other tokens for now
                 self.diagnose.push_error(CompileError::unexpected_token(
                     Any,
                     self.peek().kind.clone(),
