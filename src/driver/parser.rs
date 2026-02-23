@@ -89,7 +89,7 @@ impl<'a> Parser<'a> {
             Ret => Some(self.parse_ret()),
             Ident(_) => match self.peek_at(1).kind {
                 Eq => Some(self.parse_asgn()),
-                OpenParam => Some(Statement::Expression(self.parse_expr())),
+                OpenParam => Some(Statement::Expression(self.parse_expr_stmt())),
                 _ => {
                     self.diagnose.push_error(CompileError::unexpected_token(
                         Any,
@@ -536,6 +536,21 @@ impl<'a> Parser<'a> {
             }
         }
         Span { start, end }
+    }
+
+    fn parse_expr_stmt(&mut self) -> Expression {
+        let result = self.parse_precedence(Precedence::Assignment);
+        let semi_token = self.peek();
+        if semi_token.kind == TokenKind::Semi {
+            self.consume_quietly();
+        } else {
+            self.diagnose.push_error(CompileError::unexpected_token(
+                TokenKind::Semi,
+                semi_token.kind.clone(),
+                semi_token.span,
+            ));
+        }
+        return result;
     }
 
     fn parse_expr(&mut self) -> Expression {
