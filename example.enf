@@ -1,0 +1,67 @@
+-- Welcome to the ENF language syntax example.
+-- This file demonstrates the core features of the language.
+
+-- --- Global Variable Declarations ---
+
+val global_treshold int = 100;
+val author_name = "Enes";
+val is_active = true;
+
+
+-- --- Function Definitions ---
+
+-- A function to calculate the nth Fibonacci number.
+-- Demonstrates parameters, ret types, if/else, and recursion.
+fun fib(n int) int {
+    if n < 2 {
+        ret n;
+    } else {
+        ret fib(n - 1) + fib(n - 2);
+    }
+}
+
+-- A function that demonstrates complex expressions and loops.
+fun process_data(count int) bool {
+    var i = 0;
+    var a = 10;
+    val b = 40;
+
+    whl i < count {
+        a = a + i;
+        i = i + 1;
+    }
+
+    -- A complex boolean expression to test the parser.
+    -- This checks if two complex arithmetic expressions are equal.
+    var condition = (a * 2 - count) == (b + (count * (count - 1) / 2));
+
+    if condition {
+        -- A function call used as a standalone statement.
+        print("Calculation is correct!");
+    }
+
+    ret condition;
+}
+
+
+-- --- Main Execution Logic ---
+
+fun main() nret {
+    -- Variable declaration using a function call expression.
+    var fib_result = fib(10);
+
+    print("Fibonacci of 10 is:");
+    print(fib_result);
+
+    -- Using a more complex expression in an if statement's condition.
+    if (fib_result * 2 > global_treshold) {
+        val final_status = process_data(fib_result);
+        print("Final status of process_data:");
+        print(final_status);
+    } else {
+        print("Fib result was not over the global treshold.");
+    }
+
+    -- An assignment statement.
+    fib_result = fib_result + 1;
+}
