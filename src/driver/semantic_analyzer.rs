@@ -30,23 +30,6 @@ pub enum TypeKind {
     Error,
 }
 
-impl IdentLiteralNode {
-    fn to_type(&self) -> Type {
-        let kind = match self.value.as_str() {
-            "int" => TypeKind::Int,
-            "str" => TypeKind::Str,
-            "bool" => TypeKind::Bool,
-            "chr" => TypeKind::Char,
-            "nret" => TypeKind::Nret,
-            "err" => TypeKind::Error,
-            _ => unreachable!(), // TODO check wrong types
-        };
-        Type {
-            span: self.span,
-            kind,
-        }
-    }
-}
 #[derive(Debug)]
 enum Symbol {
     Var(VarInfo),
@@ -58,6 +41,7 @@ struct VarInfo {
     // name: String,
     typ: Type,
     mutable: bool,
+    span: Span,
 }
 
 #[derive(Debug)]
@@ -97,20 +81,52 @@ impl<'a> SemanticAnalyzer<'a> {
         self.scopes.pop();
     }
 
+    fn resolve_types(&mut self, typ: &IdentLiteralNode) -> Type {
+        let kind = match typ.value.as_str() {
+            "int" => TypeKind::Int,
+            "str" => TypeKind::Str,
+            "bool" => TypeKind::Bool,
+            "chr" => TypeKind::Char,
+            "nret" => TypeKind::Nret,
+            val => {
+                self.diagnose
+                    .push_error(CompileError::unknown_type(val.into(), typ.span));
+                TypeKind::Error
+            }
+        };
+        Type {
+            span: typ.span,
+            kind,
+        }
+    }
+
     fn collect_signatures(&mut self) {
         for stmt in self.statements {
             match stmt {
                 Statement::FunDefinition(node) => {
+                    // TODO check redefination first, resolve types later
+                    let params = node
+                        .parameters
+                        .iter()
+                        .map(|(name, typ)| (name.clone(), self.resolve_types(typ)))
+                        .collect();
+                    let ret_typ = self.resolve_types(&node.ret_type);
                     match self.scopes[0].entry(node.name.value.clone()) {
-                        Entry::Occupied(_) => {} // TODO redefination handle
+                        Entry::Occupied(occupied_entry) => {
+                            self.diagnose.push_error(CompileError::symbol_redefination(
+                                node.name.value.clone(),
+                                match occupied_entry.get() {
+                                    Symbol::Fun(fun_info) => fun_info.span,
+                                    Symbol::Var(var_info) => var_info.span,
+                                },
+                                node.name.span,
+                                crate::compile_error::SymbolKind::Function,
+                            ))
+                        }
                         Entry::Vacant(entry) => {
                             entry.insert(Symbol::Fun(FunInfo {
-                                params: node
-                                    .parameters
-                                    .iter()
-                                    .map(|(name, typ)| (name.clone(), typ.to_type()))
-                                    .collect(),
-                                ret_type: node.ret_type.to_type(),
+                                params: params,
+                                ret_type: ret_typ,
                                 span: node.span,
                             }));
                         }

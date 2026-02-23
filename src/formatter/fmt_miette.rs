@@ -10,7 +10,7 @@ pub mod fmt_miette_impl {
 
     use super::super::ErrorFormatter;
     use crate::{
-        compile_error::{CompileError, LexicalError, ParsingError},
+        compile_error::{CompileError, LexicalError, ParsingError, SemanticError, SymbolKind},
         driver::TokenKind,
     };
 
@@ -44,6 +44,15 @@ pub mod fmt_miette_impl {
                 CompileError::Lexical(LexicalError::UnterminatedLiteral { .. }) => {
                     "unterminated literal here".into()
                 }
+                CompileError::Semantic(SemanticError::SymbolRedefination { kind, .. }) => {
+                    match kind {
+                        SymbolKind::Function => "function redefination here".into(),
+                        SymbolKind::Variable => "variable redefination here".into(),
+                    }
+                }
+                CompileError::Semantic(SemanticError::UnknownType { .. }) => {
+                    "this is not a type".into()
+                }
                 _ => "error here".into(),
             };
 
@@ -76,6 +85,9 @@ pub mod fmt_miette_impl {
                             "ex: fun main(argv str, args int) '\x1b[1mnret\x1b[0m' { ... }",
                         ));
                     }
+                }
+                CompileError::Semantic(SemanticError::UnknownType { val, span }) => {
+                    return Some(Box::new("use int, chr, str, bool or nret"));
                 }
                 _ => {}
             }

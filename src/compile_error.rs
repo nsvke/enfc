@@ -9,7 +9,24 @@ pub enum CompileError {
 }
 
 #[derive(Debug)]
-pub enum SemanticError {}
+pub enum SemanticError {
+    SymbolRedefination {
+        name: String,
+        old_span: Span,
+        new_span: Span,
+        kind: SymbolKind,
+    },
+    UnknownType {
+        val: String,
+        span: Span,
+    },
+}
+#[derive(Debug)]
+pub enum SymbolKind {
+    Function,
+    Variable,
+}
+
 #[derive(Debug)]
 pub enum ParsingError {
     UnexpectedToken {
@@ -39,6 +56,22 @@ impl CompileError {
             span,
         })
     }
+    pub fn symbol_redefination(
+        name: String,
+        old_span: Span,
+        new_span: Span,
+        kind: SymbolKind,
+    ) -> Self {
+        CompileError::Semantic(SemanticError::SymbolRedefination {
+            name,
+            old_span,
+            new_span,
+            kind,
+        })
+    }
+    pub fn unknown_type(val: String, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::UnknownType { val, span })
+    }
 }
 
 pub trait ErrorFormatter {
@@ -50,7 +83,8 @@ impl CompileError {
         match self {
             Self::Lexical(LexicalError::UnterminatedLiteral { span, .. }) => *span,
             Self::Parsing(ParsingError::UnexpectedToken { span, .. }) => *span,
-            Self::Semantic(_) => Span::default(),
+            Self::Semantic(SemanticError::SymbolRedefination { new_span, .. }) => *new_span,
+            Self::Semantic(SemanticError::UnknownType { span, .. }) => *span,
         }
     }
 }
