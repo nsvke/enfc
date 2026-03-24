@@ -104,16 +104,17 @@ impl<'a> Parser<'a> {
                 self.consume_quietly();
                 None
             }
-            _ => {
-                // ignore other tokens for now
-                self.diagnose.push_error(CompileError::unexpected_token(
-                    Any,
-                    self.peek().kind.clone(),
-                    self.peek().span,
-                ));
-                self.consume_quietly();
-                Some(self.sync())
-            }
+            _ => Some(Statement::Expression(self.parse_expr_stmt())),
+            // _ => {
+            //     // ignore other tokens for now
+            //     self.diagnose.push_error(CompileError::unexpected_token(
+            //         Any,
+            //         self.peek().kind.clone(),
+            //         self.peek().span,
+            //     ));
+            //     self.consume_quietly();
+            //     Some(self.sync())
+            // }
         }
     }
 
@@ -819,11 +820,10 @@ pub(crate) enum Statement {
     If(IfNode),
     While(WhileNode), // +
     FunDefinition(FunDefNode),
-    Block(BlockNode), // +
-    Expression(Expression),
-    Return(ReturnNode),
-    Broken(Span), // parser hata varsa yine de recovery ile bir statement olusturmayi dener ve bu sayede iyi kotu bir ast dizisi linter'a gider. linter da gordugu hatalari raporlar ama zaten brokenstatement oldugundan derleme yapilmaz.
-                  //Empty,                 // simdilik derleyici aglamasin diye koyuldu, sonra silinecek
+    Block(BlockNode),       // +
+    Expression(Expression), // +
+    Return(ReturnNode),     // +
+    Broken(Span),           // +
 }
 
 impl From<Span> for Statement {
@@ -999,6 +999,7 @@ impl fmt::Debug for AssignmentNode {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum BinaryOperator {
     // Logical
     Or,
@@ -1168,10 +1169,10 @@ impl fmt::Debug for FieldAccessNode {
 }
 
 pub(crate) struct BinaryExpressionNode {
-    left: Box<Expression>,
-    op: BinaryOperator,
-    right: Box<Expression>,
-    span: Span,
+    pub left: Box<Expression>,
+    pub op: BinaryOperator,
+    pub right: Box<Expression>,
+    pub span: Span,
 }
 impl fmt::Debug for BinaryExpressionNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1189,9 +1190,9 @@ impl fmt::Debug for BinaryExpressionNode {
 }
 
 pub(crate) struct UnaryExpressionNode {
-    operator: UnaryOperator,
-    operand: Box<Expression>,
-    span: Span,
+    pub operator: UnaryOperator,
+    pub operand: Box<Expression>,
+    pub span: Span,
 }
 impl fmt::Debug for UnaryExpressionNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1207,6 +1208,7 @@ impl fmt::Debug for UnaryExpressionNode {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum UnaryOperator {
     Not,
     Neg,
@@ -1223,9 +1225,9 @@ impl fmt::Debug for UnaryOperator {
 }
 
 pub(crate) struct CallNode {
-    primary: Box<Expression>,
-    arguments: Vec<Expression>,
-    span: Span,
+    pub primary: Box<Expression>,
+    pub arguments: Vec<Expression>,
+    pub span: Span,
 }
 impl fmt::Debug for CallNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1243,8 +1245,8 @@ impl fmt::Debug for CallNode {
 
 // hizli new metodlari
 pub(crate) struct LiteralNode {
-    value: LiteralValue,
-    span: Span,
+    pub value: LiteralValue,
+    pub span: Span,
 }
 impl fmt::Debug for LiteralNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1252,13 +1254,12 @@ impl fmt::Debug for LiteralNode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum LiteralValue {
     Number(i32),
     Str(String),
     Bool(bool),
     Char(char),
-    Null,
 }
 
 #[derive(Clone)]

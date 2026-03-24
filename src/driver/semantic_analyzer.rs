@@ -3,13 +3,15 @@
 use crate::compile_error::CompileError;
 use crate::diagnostic::Diagnostics;
 use crate::driver::parser::{
-    BinaryOperator, Expression, IdentLiteralNode, LiteralNode, Statement, UnaryOperator,
+    BinaryExpressionNode, BinaryOperator, CallNode, Expression, IdentLiteralNode, LiteralNode,
+    LiteralValue, Statement, UnaryExpressionNode, UnaryOperator,
 };
 use crate::structs::Span;
 use std::collections::{HashMap, hash_map::Entry};
+use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Type {
+pub struct Type {
     pub span: Span,
     pub kind: TypeKind,
 }
@@ -21,66 +23,46 @@ impl Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TypeKind {
+pub enum TypeKind {
     Int,
     Str,
     Bool,
     Char,
     Nret,
     Error,
+    Function { params: Vec<Type>, ret: Box<Type> },
+    Unknown,
 }
 
 #[derive(Debug)]
-enum Symbol {
-    Var(VarInfo),
-    Fun(FunInfo),
-}
-
-#[derive(Debug)]
-struct VarInfo {
-    // name: String,
-    typ: Type,
-    mutable: bool,
-    span: Span,
-}
-
-#[derive(Debug)]
-struct FunInfo {
-    // name: String,
-    params: Vec<(IdentLiteralNode, Type)>, // (param_name, param_type)
-    ret_type: Type,
-    span: Span,
+pub(crate) struct Symbol {
+    pub typ: Type,
+    pub span: Span,
+    pub mutable: bool,
 }
 
 pub(crate) struct SemanticAnalyzer<'a> {
-    statements: &'a [Statement],
+    // statements: &'a [Statement],
     scopes: Vec<HashMap<String, Symbol>>,
     diagnose: &'a mut Diagnostics,
-    destruct: bool,
+    // destruct: bool,
 }
 
 impl<'a> SemanticAnalyzer<'a> {
-    pub(crate) fn new(statements: &'a [Statement], diagnose: &'a mut Diagnostics) -> Self {
+    pub(crate) fn new(diagnose: &'a mut Diagnostics) -> Self {
         Self {
-            statements,
             scopes: vec![HashMap::new()],
             diagnose,
-            destruct: false,
         }
     }
-    pub(crate) fn analyze(&mut self) -> Result<Vec<TypedStatement>, Vec<TypedStatement>> {
-        let v = self.analyze_and_collect();
-        if !self.destruct {
-            if !v.is_empty() { Ok(v) } else { Err(v) }
-        } else {
-            Err(v)
-        }
+    pub(crate) fn analyze(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
+        self.analyze_and_collect(statements)
     }
 
-    fn analyze_and_collect(&mut self) -> Vec<TypedStatement> {
+    fn analyze_and_collect(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
         let mut typed_statements = Vec::new();
-        self.collect_signatures();
-        for stmt in self.statements {
+        self.collect_signatures(statements);
+        for stmt in statements {
             //
         }
         typed_statements
@@ -101,7 +83,6 @@ impl<'a> SemanticAnalyzer<'a> {
             "chr" => TypeKind::Char,
             "nret" => TypeKind::Nret,
             val => {
-                self.destruct = true;
                 self.diagnose
                     .push_error(CompileError::unknown_type(val.into(), typ.span));
                 TypeKind::Error
@@ -114,15 +95,13 @@ impl<'a> SemanticAnalyzer<'a> {
     }
 
     fn broken_typed_statement(&mut self, span: Span) -> TypedStatement {
-        self.destruct = true;
         TypedStatement {
             kind: TypedStatementKind::Broken,
             span,
         }
     }
 
-    fn broken_typed_expr(&mut self, span: Span) -> TypedExpression {
-        self.destruct = true;
+    fn broken_typed_expr(&self, span: Span) -> TypedExpression {
         TypedExpression {
             kind: TypedExpressionKind::Broken,
             typ: TypeKind::Error,
@@ -130,36 +109,38 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn collect_signatures(&mut self) {
-        for stmt in self.statements {
+    fn collect_signatures(&mut self, statements: &'a [Statement]) {
+        for stmt in statements {
             match stmt {
                 Statement::FunDefinition(node) => {
                     // TODO check redefination first, resolve types later
                     let params = node
                         .parameters
                         .iter()
-                        .map(|(name, typ)| (name.clone(), self.resolve_types(typ)))
+                        .map(|(_, typ)| self.resolve_types(typ))
                         .collect();
                     let ret_typ = self.resolve_types(&node.ret_type);
                     match self.scopes[0].entry(node.name.value.clone()) {
                         Entry::Occupied(occupied_entry) => {
-                            self.destruct = true;
                             self.diagnose.push_error(CompileError::symbol_redefination(
                                 node.name.value.clone(),
-                                match occupied_entry.get() {
-                                    Symbol::Fun(fun_info) => fun_info.span,
-                                    Symbol::Var(var_info) => var_info.span,
-                                },
+                                occupied_entry.get().span,
                                 node.name.span,
                                 crate::compile_error::SymbolKind::Function,
                             ))
                         }
                         Entry::Vacant(entry) => {
-                            entry.insert(Symbol::Fun(FunInfo {
-                                params: params,
-                                ret_type: ret_typ,
+                            entry.insert(Symbol {
+                                typ: Type {
+                                    span: node.span,
+                                    kind: TypeKind::Function {
+                                        params,
+                                        ret: Box::new(ret_typ),
+                                    },
+                                },
                                 span: node.span,
-                            }));
+                                mutable: false,
+                            });
                         }
                     };
                 }
@@ -168,17 +149,164 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
+    fn check_redefinition(&mut self, ident: &IdentLiteralNode) -> bool {
+        self.scopes.last().unwrap().contains_key(&ident.value)
+    }
+
+    fn resolve_symbol(&mut self, s: &str) -> TypeKind {
+        let mut typ = TypeKind::Unknown;
+        for scope in self.scopes.iter().rev() {
+            if let Some(symbol) = scope.get(s) {
+                typ = symbol.typ.kind.clone();
+                break;
+            }
+        }
+        typ
+    }
+
+    fn analyze_expr_call(&mut self, node: &CallNode) -> TypedExpression {
+        let typed_primary = self.analyze_expression(&node.primary);
+
+        if typed_primary.typ == TypeKind::Unknown {} // check error
+
+        // check is it callable
+        // check arguments
+
+        self.broken_typed_expr(Span::default()) // return real expr node
+    }
+
+    fn analyze_expr_binary(&mut self, node: &BinaryExpressionNode) -> TypedExpression {
+        let (expected_op, final_type) = match node.op {
+            BinaryOperator::Add
+            | BinaryOperator::Sub
+            | BinaryOperator::Mul
+            | BinaryOperator::Div
+            | BinaryOperator::Percent => (TypeKind::Int, TypeKind::Int),
+            BinaryOperator::Greater
+            | BinaryOperator::Less
+            | BinaryOperator::GreaterEquals
+            | BinaryOperator::LessEquals => (TypeKind::Int, TypeKind::Bool),
+            BinaryOperator::And | BinaryOperator::Or => (TypeKind::Bool, TypeKind::Bool),
+            BinaryOperator::IsEquals | BinaryOperator::IsNotEquals => {
+                (TypeKind::Unknown, TypeKind::Bool)
+            }
+        };
+
+        let typed_left = self.analyze_expression(&node.left);
+        let typed_right = self.analyze_expression(&node.right);
+
+        let mut typ = final_type.clone();
+
+        if typed_left.typ == TypeKind::Unknown || typed_right.typ == TypeKind::Unknown {
+            typ = TypeKind::Unknown;
+        }
+
+        if typ != TypeKind::Unknown {
+            // TODO add operator to type mismatch error
+            if expected_op != TypeKind::Unknown {
+                if typed_left.typ != expected_op || typed_right.typ != expected_op {
+                    self.diagnose.push_error(CompileError::type_mismatch(
+                        typed_left.typ.clone(),
+                        typed_right.typ.clone(),
+                        typed_left.span,
+                        typed_right.span,
+                        format!("{:?}", node.op),
+                    ));
+                    typ = TypeKind::Unknown;
+                }
+            } else {
+                if typed_left.typ != typed_right.typ {
+                    self.diagnose.push_error(CompileError::type_mismatch(
+                        typed_left.typ.clone(),
+                        typed_right.typ.clone(),
+                        typed_left.span,
+                        typed_right.span,
+                        format!("{:?}", node.op),
+                    ));
+                    typ = TypeKind::Unknown;
+                }
+            }
+        }
+
+        TypedExpression {
+            kind: TypedExpressionKind::Binary(TypedBinaryExpressionNode {
+                left: Box::new(typed_left),
+                op: node.op,
+                right: Box::new(typed_right),
+            }),
+            typ,
+            span: node.span,
+        }
+    }
+
+    fn analyze_expr_unary(&mut self, node: &UnaryExpressionNode) -> TypedExpression {
+        let expected_op = match node.operator {
+            UnaryOperator::Neg => TypeKind::Int,
+            UnaryOperator::Not => TypeKind::Bool,
+        };
+
+        let typed_operand = self.analyze_expression(&node.operand);
+
+        let mut typ = expected_op.clone();
+
+        if typed_operand.typ != expected_op {
+            self.diagnose.push_error(CompileError::not_unary_type(
+                format!("{:?}", typed_operand.typ),
+                typed_operand.span,
+            ));
+            typ = TypeKind::Unknown;
+        }
+
+        TypedExpression {
+            kind: TypedExpressionKind::Unary(TypedUnaryExpressionNode {
+                operator: node.operator,
+                operand: Box::new(typed_operand),
+            }),
+            typ: typ,
+            span: node.span,
+        }
+    }
+
+    fn analyze_expr_ident(&mut self, node: &IdentLiteralNode) -> TypedExpression {
+        let typ = self.resolve_symbol(&node.value);
+        if typ == TypeKind::Unknown {
+            self.diagnose
+                .push_error(CompileError::unknown_symbol(node.value.clone(), node.span));
+        }
+        TypedExpression {
+            kind: TypedExpressionKind::Ident(node.clone()),
+            typ,
+            span: node.span,
+        }
+    }
+
+    fn analyze_expr_literal(&mut self, node: &LiteralNode) -> TypedExpression {
+        let typ = match node.value {
+            LiteralValue::Str(_) => TypeKind::Str,
+            LiteralValue::Number(_) => TypeKind::Int,
+            LiteralValue::Char(_) => TypeKind::Char,
+            LiteralValue::Bool(_) => TypeKind::Bool,
+        };
+        TypedExpression {
+            kind: TypedExpressionKind::Literal(LiteralNode {
+                value: node.value.clone(),
+                span: node.span,
+            }),
+            typ: typ,
+            span: node.span,
+        }
+    }
+
     fn analyze_expression(&mut self, expr: &Expression) -> TypedExpression {
         match expr {
-            Expression::Binary(exp) => {}
-            Expression::Unary(exp) => {}
-            Expression::Literal(exp) => {}
-            Expression::Ident(exp) => {}
-            Expression::Call(exp) => {}
-            Expression::Index(exp) => {}
-            Expression::FieldAccess(exp) => {}
+            Expression::Binary(exp) => {}      //+
+            Expression::Unary(exp) => {}       //+
+            Expression::Literal(exp) => {}     //+
+            Expression::Ident(exp) => {}       //+
+            Expression::Call(exp) => {}        //
+            Expression::Index(exp) => {}       //
+            Expression::FieldAccess(exp) => {} //
             Expression::Broken(span) => {
-                self.destruct = true;
                 // self.broken_typed_expr(span)
             }
         };

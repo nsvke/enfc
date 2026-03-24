@@ -408,6 +408,7 @@ impl<'a> Lexer<'a> {
                     let end2 = self.end_offset().unwrap_or(end + 1);
                     if d_sym == TokenKind::SemiSemi {
                         self.push_ident_token_w_kind(TokenKind::Semi, off, end);
+                        self.eat_line_comment();
                     } else if d_sym == TokenKind::LineComment {
                         self.eat_line_comment();
                     } else {

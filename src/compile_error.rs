@@ -1,4 +1,5 @@
 use crate::driver::TokenKind;
+use crate::driver::TypeKind;
 use crate::structs::Span;
 
 #[derive(Debug)]
@@ -19,6 +20,21 @@ pub enum SemanticError {
     UnknownType {
         val: String,
         span: Span,
+    },
+    UnknownSymbol {
+        val: String,
+        span: Span,
+    },
+    NotUnaryType {
+        val: String,
+        span: Span,
+    },
+    TypeMismatch {
+        l_typ: TypeKind,
+        r_typ: TypeKind,
+        l_span: Span,
+        r_span: Span,
+        op: String,
     },
 }
 #[derive(Debug)]
@@ -72,6 +88,27 @@ impl CompileError {
     pub fn unknown_type(val: String, span: Span) -> Self {
         CompileError::Semantic(SemanticError::UnknownType { val, span })
     }
+    pub fn unknown_symbol(val: String, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::UnknownSymbol { val, span })
+    }
+    pub fn not_unary_type(val: String, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::NotUnaryType { val, span })
+    }
+    pub fn type_mismatch(
+        l_typ: TypeKind,
+        r_typ: TypeKind,
+        l_span: Span,
+        r_span: Span,
+        op: String,
+    ) -> Self {
+        CompileError::Semantic(SemanticError::TypeMismatch {
+            l_typ,
+            r_typ,
+            l_span,
+            r_span,
+            op,
+        })
+    }
 }
 
 pub trait ErrorFormatter {
@@ -85,6 +122,12 @@ impl CompileError {
             Self::Parsing(ParsingError::UnexpectedToken { span, .. }) => *span,
             Self::Semantic(SemanticError::SymbolRedefination { new_span, .. }) => *new_span,
             Self::Semantic(SemanticError::UnknownType { span, .. }) => *span,
+            Self::Semantic(SemanticError::UnknownSymbol { span, .. }) => *span,
+            Self::Semantic(SemanticError::NotUnaryType { span, .. }) => *span,
+            Self::Semantic(SemanticError::TypeMismatch { l_span, r_span, .. }) => Span {
+                start: l_span.start,
+                end: r_span.end,
+            },
         }
     }
 }

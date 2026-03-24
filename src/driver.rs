@@ -2,13 +2,14 @@ mod lexer;
 mod parser;
 mod semantic_analyzer;
 
-pub use lexer::{Token, TokenKind};
-
 use crate::{
     config::Config,
     diagnostic::Diagnostics,
     driver::{lexer::Lexer, parser::Parser, semantic_analyzer::SemanticAnalyzer},
 };
+
+pub use lexer::{Token, TokenKind};
+pub use semantic_analyzer::TypeKind;
 
 pub struct Driver {
     diagnose: Diagnostics,
@@ -46,8 +47,8 @@ impl Driver {
             );
         });
 
-        let mut sa = SemanticAnalyzer::new(&statements, &mut self.diagnose);
-        let typed_statements = sa.analyze();
+        let mut sa = SemanticAnalyzer::new(&mut self.diagnose);
+        let typed_statements = sa.analyze(&statements);
         println!("------------------------------------------------------------------------------");
         println!("TypedStatement List");
         println!("------------------------------------------------------------------------------");
