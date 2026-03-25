@@ -4,7 +4,7 @@ use std::fmt;
 use crate::{
     compile_error::CompileError,
     diagnostic::Diagnostics,
-    driver::lexer::{
+    driver::lex::{
         LiteralKind::*,
         Token,
         TokenKind::{self, *},
@@ -1298,7 +1298,7 @@ impl fmt::Debug for ReturnNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::driver::lexer::Lexer;
+    use crate::driver::lex::Lexer;
 
     fn parse_source(source: &str) -> (Vec<Statement>, Diagnostics) {
         let mut diag = Diagnostics::empty_diagnostics(source.to_string());

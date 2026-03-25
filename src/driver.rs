@@ -1,15 +1,15 @@
-mod lexer;
-mod parser;
-mod semantic_analyzer;
+mod lex;
+mod parse;
+mod typecheck;
 
 use crate::{
     config::Config,
     diagnostic::Diagnostics,
-    driver::{lexer::Lexer, parser::Parser, semantic_analyzer::SemanticAnalyzer},
+    driver::{lex::Lexer, parse::Parser, typecheck::TypeChecker},
 };
 
-pub use lexer::{Token, TokenKind};
-pub use semantic_analyzer::TypeKind;
+pub use lex::{Token, TokenKind};
+pub use typecheck::TypeKind;
 
 pub struct Driver {
     diagnose: Diagnostics,
@@ -47,8 +47,8 @@ impl Driver {
             );
         });
 
-        let mut sa = SemanticAnalyzer::new(&mut self.diagnose);
-        let typed_statements = sa.analyze(&statements);
+        let mut typechecker = TypeChecker::new(&mut self.diagnose);
+        let typed_statements = typechecker.check(&statements);
         println!("------------------------------------------------------------------------------");
         println!("TypedStatement List");
         println!("------------------------------------------------------------------------------");

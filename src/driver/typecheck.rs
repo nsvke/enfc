@@ -2,7 +2,7 @@
 
 use crate::compile_error::CompileError;
 use crate::diagnostic::Diagnostics;
-use crate::driver::parser::{
+use crate::driver::parse::{
     BinaryExpressionNode, BinaryOperator, CallNode, Expression, FieldAccessNode, IdentLiteralNode,
     IndexExpressionNode, LiteralNode, LiteralValue, Statement, UnaryExpressionNode, UnaryOperator,
 };
@@ -41,25 +41,25 @@ pub(crate) struct Symbol {
     pub mutable: bool,
 }
 
-pub(crate) struct SemanticAnalyzer<'a> {
+pub(crate) struct TypeChecker<'a> {
     // statements: &'a [Statement],
     scopes: Vec<HashMap<String, Symbol>>,
     diagnose: &'a mut Diagnostics,
     // destruct: bool,
 }
 
-impl<'a> SemanticAnalyzer<'a> {
+impl<'a> TypeChecker<'a> {
     pub(crate) fn new(diagnose: &'a mut Diagnostics) -> Self {
         Self {
             scopes: vec![HashMap::new()],
             diagnose,
         }
     }
-    pub(crate) fn analyze(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
-        self.analyze_and_collect(statements)
+    pub(crate) fn check(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
+        self.check_and_collect(statements)
     }
 
-    fn analyze_and_collect(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
+    fn check_and_collect(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
         let mut typed_statements = Vec::new();
         self.collect_signatures(statements);
         for stmt in statements {
@@ -94,7 +94,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn broken_typed_statement(&mut self, span: Span) -> TypedStatement {
+    fn broken_typed_stmt(&mut self, span: Span) -> TypedStatement {
         TypedStatement {
             kind: TypedStatementKind::Broken,
             span,
@@ -164,7 +164,7 @@ impl<'a> SemanticAnalyzer<'a> {
         typ
     }
 
-    fn analyze_expr_field(&mut self, node: &FieldAccessNode) -> TypedExpression {
+    fn check_expr_field(&mut self, node: &FieldAccessNode) -> TypedExpression {
         self.diagnose
             .push_error(CompileError::feature_not_supported(
                 "FieldAccess".into(),
@@ -172,7 +172,7 @@ impl<'a> SemanticAnalyzer<'a> {
             ));
         TypedExpression {
             kind: TypedExpressionKind::FieldAccess(TypedFieldAccessNode {
-                target: Box::new(self.analyze_expression(&node.target)),
+                target: Box::new(self.check_expr(&node.target)),
                 field: node.field.clone(),
             }),
             typ: TypeKind::Unknown,
@@ -180,7 +180,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn analyze_expr_index(&mut self, node: &IndexExpressionNode) -> TypedExpression {
+    fn check_expr_index(&mut self, node: &IndexExpressionNode) -> TypedExpression {
         self.diagnose
             .push_error(CompileError::feature_not_supported(
                 "IndexAccess".into(),
@@ -188,16 +188,16 @@ impl<'a> SemanticAnalyzer<'a> {
             ));
         TypedExpression {
             kind: TypedExpressionKind::Index(TypedIndexExpressionNode {
-                target: Box::new(self.analyze_expression(&node.target)),
-                index: Box::new(self.analyze_expression(&node.index)),
+                target: Box::new(self.check_expr(&node.target)),
+                index: Box::new(self.check_expr(&node.index)),
             }),
             typ: TypeKind::Unknown,
             span: node.span,
         }
     }
 
-    fn analyze_expr_call(&mut self, node: &CallNode) -> TypedExpression {
-        let typed_primary = self.analyze_expression(&node.primary);
+    fn check_expr_call(&mut self, node: &CallNode) -> TypedExpression {
+        let typed_primary = self.check_expr(&node.primary);
 
         let mut typ = TypeKind::Unknown;
 
@@ -215,7 +215,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     }
 
                     for (i, arg_expr) in node.arguments.iter().enumerate() {
-                        let typed_arg = self.analyze_expression(arg_expr);
+                        let typed_arg = self.check_expr(arg_expr);
 
                         if let Some(expected_typ) = params.get(i) {
                             if typed_arg.typ != expected_typ.kind {
@@ -251,7 +251,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn analyze_expr_binary(&mut self, node: &BinaryExpressionNode) -> TypedExpression {
+    fn check_expr_binary(&mut self, node: &BinaryExpressionNode) -> TypedExpression {
         let (expected_op, final_type) = match node.op {
             BinaryOperator::Add
             | BinaryOperator::Sub
@@ -268,8 +268,8 @@ impl<'a> SemanticAnalyzer<'a> {
             }
         };
 
-        let typed_left = self.analyze_expression(&node.left);
-        let typed_right = self.analyze_expression(&node.right);
+        let typed_left = self.check_expr(&node.left);
+        let typed_right = self.check_expr(&node.right);
 
         let mut typ = final_type.clone();
 
@@ -324,13 +324,13 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn analyze_expr_unary(&mut self, node: &UnaryExpressionNode) -> TypedExpression {
+    fn check_expr_unary(&mut self, node: &UnaryExpressionNode) -> TypedExpression {
         let expected_op = match node.operator {
             UnaryOperator::Neg => TypeKind::Int,
             UnaryOperator::Not => TypeKind::Bool,
         };
 
-        let typed_operand = self.analyze_expression(&node.operand);
+        let typed_operand = self.check_expr(&node.operand);
 
         let mut typ = expected_op.clone();
 
@@ -352,7 +352,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn analyze_expr_ident(&mut self, node: &IdentLiteralNode) -> TypedExpression {
+    fn check_expr_ident(&mut self, node: &IdentLiteralNode) -> TypedExpression {
         let typ = self.resolve_symbol(&node.value);
         if typ == TypeKind::Unknown {
             self.diagnose
@@ -365,7 +365,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn analyze_expr_literal(&mut self, node: &LiteralNode) -> TypedExpression {
+    fn check_expr_literal(&mut self, node: &LiteralNode) -> TypedExpression {
         let typ = match node.value {
             LiteralValue::Str(_) => TypeKind::Str,
             LiteralValue::Number(_) => TypeKind::Int,
@@ -382,15 +382,15 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    fn analyze_expression(&mut self, expr: &Expression) -> TypedExpression {
+    fn check_expr(&mut self, expr: &Expression) -> TypedExpression {
         match expr {
-            Expression::Binary(node) => self.analyze_expr_binary(node),
-            Expression::Unary(node) => self.analyze_expr_unary(node),
-            Expression::Literal(node) => self.analyze_expr_literal(node),
-            Expression::Ident(node) => self.analyze_expr_ident(node),
-            Expression::Call(node) => self.analyze_expr_call(node),
-            Expression::Index(node) => self.analyze_expr_index(node),
-            Expression::FieldAccess(node) => self.analyze_expr_field(node),
+            Expression::Binary(node) => self.check_expr_binary(node),
+            Expression::Unary(node) => self.check_expr_unary(node),
+            Expression::Literal(node) => self.check_expr_literal(node),
+            Expression::Ident(node) => self.check_expr_ident(node),
+            Expression::Call(node) => self.check_expr_call(node),
+            Expression::Index(node) => self.check_expr_index(node),
+            Expression::FieldAccess(node) => self.check_expr_field(node),
             Expression::Broken(span) => self.broken_typed_expr(*span),
         }
     }
