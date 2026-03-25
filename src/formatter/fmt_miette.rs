@@ -48,6 +48,7 @@ pub mod fmt_miette_impl {
                     match kind {
                         SymbolKind::Function => "function redefination here".into(),
                         SymbolKind::Variable => "variable redefination here".into(),
+                        SymbolKind::Parameter => "parameter redefination here".into(),
                     }
                 }
                 CompileError::Semantic(SemanticError::UnknownType { .. }) => {

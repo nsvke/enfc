@@ -1,10 +1,11 @@
 #![allow(unused)]
 
-use crate::compile_error::CompileError;
+use crate::compile_error::{CompileError, SymbolKind};
 use crate::diagnostic::Diagnostics;
 use crate::driver::parse::{
-    BinaryExpressionNode, BinaryOperator, CallNode, Expression, FieldAccessNode, IdentLiteralNode,
-    IndexExpressionNode, LiteralNode, LiteralValue, Statement, UnaryExpressionNode, UnaryOperator,
+    AssignmentNode, BinaryExpressionNode, BinaryOperator, BlockNode, CallNode, Expression,
+    FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode, IndexExpressionNode, LiteralNode,
+    LiteralValue, ReturnNode, Statement, UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
 };
 use crate::structs::Span;
 use std::collections::{HashMap, hash_map::Entry};
@@ -29,12 +30,12 @@ pub enum TypeKind {
     Bool,
     Char,
     Nret,
-    Error,
+    // Error,
     Function { params: Vec<Type>, ret: Box<Type> },
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Symbol {
     pub typ: Type,
     pub span: Span,
@@ -46,6 +47,7 @@ pub(crate) struct TypeChecker<'a> {
     scopes: Vec<HashMap<String, Symbol>>,
     diagnose: &'a mut Diagnostics,
     // destruct: bool,
+    expected_return_type: Option<TypeKind>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -53,6 +55,7 @@ impl<'a> TypeChecker<'a> {
         Self {
             scopes: vec![HashMap::new()],
             diagnose,
+            expected_return_type: None,
         }
     }
     pub(crate) fn check(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
@@ -63,7 +66,7 @@ impl<'a> TypeChecker<'a> {
         let mut typed_statements = Vec::new();
         self.collect_signatures(statements);
         for stmt in statements {
-            //
+            typed_statements.push(self.check_stmt(stmt));
         }
         typed_statements
     }
@@ -82,10 +85,11 @@ impl<'a> TypeChecker<'a> {
             "bool" => TypeKind::Bool,
             "chr" => TypeKind::Char,
             "nret" => TypeKind::Nret,
+            "" => TypeKind::Unknown,
             val => {
                 self.diagnose
                     .push_error(CompileError::unknown_type(val.into(), typ.span));
-                TypeKind::Error
+                TypeKind::Unknown
             }
         };
         Type {
@@ -98,13 +102,14 @@ impl<'a> TypeChecker<'a> {
         TypedStatement {
             kind: TypedStatementKind::Broken,
             span,
+            terminates: false,
         }
     }
 
     fn broken_typed_expr(&self, span: Span) -> TypedExpression {
         TypedExpression {
             kind: TypedExpressionKind::Broken,
-            typ: TypeKind::Error,
+            typ: TypeKind::Unknown,
             span,
         }
     }
@@ -149,19 +154,359 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_redefinition(&mut self, ident: &IdentLiteralNode) -> bool {
-        self.scopes.last().unwrap().contains_key(&ident.value)
-    }
-
-    fn resolve_symbol(&mut self, s: &str) -> TypeKind {
-        let mut typ = TypeKind::Unknown;
+    fn resolve_symbol_type(&mut self, s: &str) -> TypeKind {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.get(s) {
-                typ = symbol.typ.kind.clone();
-                break;
+                return symbol.typ.kind.clone();
             }
         }
-        typ
+        TypeKind::Unknown
+    }
+
+    fn resolve_symbol(&self, s: &str) -> Option<Symbol> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(symbol) = scope.get(s) {
+                return Some(symbol.clone());
+            }
+        }
+        None
+    }
+
+    fn check_stmt_fun(&mut self, node: &FunDefNode) -> TypedStatement {
+        if self.expected_return_type.is_some() {
+            self.diagnose
+                .push_error(CompileError::nested_function(node.name.span));
+
+            return self.broken_typed_stmt(node.span);
+        }
+
+        let typ = self.resolve_types(&node.ret_type); // if type could not resolve, this return Unknown
+        self.expected_return_type = Some(typ.kind.clone());
+
+        self.enter_scope();
+
+        for param in &node.parameters {
+            let symbol = Symbol {
+                span: param.0.span,
+                mutable: false,
+                typ: self.resolve_types(&param.1),
+            };
+
+            match self.scopes.last_mut().unwrap().entry(param.0.value.clone()) {
+                Entry::Occupied(occupied_entry) => {
+                    self.diagnose.push_error(CompileError::symbol_redefination(
+                        param.0.value.clone(),
+                        occupied_entry.get().span,
+                        param.0.span,
+                        SymbolKind::Parameter,
+                    ))
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(symbol);
+                }
+            };
+        }
+
+        let typed_body = self.check_stmt_block(&node.body);
+
+        if typ.kind != TypeKind::Nret && typ.kind != TypeKind::Unknown && !typed_body.terminates {
+            self.diagnose.push_error(CompileError::missing_return(Span {
+                // fun main () { -- fun main () nret {
+                //     ^^^^^^^^^        ^^^^^^^^^^^^^^
+                start: node.name.span.start,
+                end: node.body.span.start,
+            }));
+        }
+
+        self.exit_scope();
+
+        self.expected_return_type = None;
+
+        TypedStatement {
+            kind: TypedStatementKind::FunDefinition(TypedFunDefNode {
+                name: node.name.clone(),
+                parameters: node.parameters.clone(),
+                ret_type: typ,
+                body: typed_body.into_block_node(),
+            }),
+            span: node.span,
+            terminates: false,
+        }
+    }
+
+    fn check_stmt_if(&mut self, node: &IfNode) -> TypedStatement {
+        let typed_condition = self.check_expr(&node.condition);
+
+        if typed_condition.typ != TypeKind::Bool && typed_condition.typ != TypeKind::Unknown {
+            self.diagnose.push_error(CompileError::unexpected_type(
+                TypeKind::Bool,
+                typed_condition.typ.clone(),
+                typed_condition.span,
+            ));
+        }
+
+        let typed_then = self.check_stmt_block(&node.then_branch);
+        let then_terminates = typed_then.terminates;
+
+        let mut else_if_terminates = true;
+        let mut typed_else_ifs = Vec::with_capacity(node.else_if_branches.len());
+        for else_if in &node.else_if_branches {
+            let typed_elif_cond = self.check_expr(&else_if.condition);
+            if typed_elif_cond.typ != TypeKind::Bool && typed_elif_cond.typ != TypeKind::Unknown {
+                self.diagnose.push_error(CompileError::unexpected_type(
+                    TypeKind::Bool,
+                    typed_elif_cond.typ.clone(),
+                    typed_elif_cond.span,
+                ));
+            }
+            let typed_elif_then = self.check_stmt_block(&else_if.then_branch);
+
+            else_if_terminates &= typed_elif_then.terminates;
+
+            typed_else_ifs.push(TypedElseIfNode {
+                condition: typed_elif_cond,
+                then_branch: typed_elif_then.into_block_node(),
+            });
+        }
+
+        let else_terminates: bool;
+        let typed_else = if let Some(els) = &node.else_branch {
+            let typed_stmt = self.check_stmt_block(els);
+            else_terminates = typed_stmt.terminates;
+            Some(typed_stmt.into_block_node())
+        } else {
+            else_terminates = false;
+            None
+        };
+
+        TypedStatement {
+            kind: TypedStatementKind::If(TypedIfNode {
+                condition: typed_condition,
+                then_branch: typed_then.into_block_node(),
+                else_if_branches: typed_else_ifs,
+                else_branch: typed_else,
+            }),
+            span: node.span,
+            terminates: then_terminates && else_if_terminates && else_terminates,
+        }
+    }
+
+    fn check_stmt_while(&mut self, node: &WhileNode) -> TypedStatement {
+        let typed_condition = self.check_expr(&node.condition);
+
+        if typed_condition.typ != TypeKind::Bool && typed_condition.typ != TypeKind::Unknown {
+            self.diagnose.push_error(CompileError::unexpected_type(
+                TypeKind::Bool,
+                typed_condition.typ.clone(),
+                typed_condition.span,
+            ));
+        }
+
+        let typed_body = self.check_stmt_block(&node.body).into_block_node();
+
+        TypedStatement {
+            kind: TypedStatementKind::While(TypedWhileNode {
+                condition: typed_condition,
+                body: typed_body,
+            }),
+            span: node.span,
+            terminates: false,
+        }
+    }
+
+    fn check_stmt_block(&mut self, node: &BlockNode) -> TypedStatement {
+        self.enter_scope();
+
+        let mut body: Vec<TypedStatement> = Vec::with_capacity(node.body.len());
+
+        let mut terminates = false;
+
+        for stmt in &node.body {
+            let typed_stmt = self.check_stmt(stmt);
+
+            // TODO add dead code warning
+            if typed_stmt.terminates {
+                terminates = true;
+            }
+
+            body.push(typed_stmt);
+        }
+
+        self.exit_scope();
+
+        TypedStatement {
+            kind: TypedStatementKind::Block(TypedBlockNode { body }),
+            span: node.span,
+            terminates,
+        }
+    }
+
+    fn check_stmt_return(&mut self, node: &ReturnNode) -> TypedStatement {
+        let (typed_value, typ) = match &node.value {
+            Some(expr) => {
+                let typed = self.check_expr(expr);
+                let ty = typed.typ.clone();
+                (Some(typed), ty)
+            }
+            None => (None, TypeKind::Nret),
+        };
+
+        match &self.expected_return_type {
+            Some(expected_typ) => {
+                if typ != TypeKind::Unknown && *expected_typ != typ {
+                    let value_span = typed_value.as_ref().map(|v| v.span).unwrap_or(node.span);
+
+                    self.diagnose.push_error(CompileError::type_mismatch(
+                        expected_typ.clone(),
+                        typ,
+                        node.span, // TODO add return location state in TypeChecker
+                        value_span,
+                        "return".into(),
+                    ));
+                }
+            }
+            None => {
+                self.diagnose
+                    .push_error(CompileError::invalid_return_location(node.span));
+            }
+        }
+
+        TypedStatement {
+            kind: TypedStatementKind::Return(TypedReturnNode { value: typed_value }),
+            span: node.span,
+            terminates: true,
+        }
+    }
+
+    fn check_stmt_assign(&mut self, node: &AssignmentNode) -> TypedStatement {
+        let symbol = self.resolve_symbol(&node.left.value);
+        let typed_right = self.check_expr(&node.right);
+
+        if let Some(sym) = symbol {
+            if sym.mutable == false {
+                self.diagnose.push_error(CompileError::not_mutable(
+                    node.left.value.clone(),
+                    node.left.span,
+                ));
+            }
+            if typed_right.typ != TypeKind::Unknown {
+                if sym.typ.kind != typed_right.typ {
+                    let typ = sym.typ.kind.clone();
+                    self.diagnose.push_error(CompileError::type_mismatch(
+                        typ,
+                        typed_right.typ.clone(),
+                        node.left.span,
+                        typed_right.span,
+                        "assign".into(),
+                    ));
+                }
+            }
+        } else {
+            self.diagnose.push_error(CompileError::unknown_symbol(
+                node.left.value.clone(),
+                node.left.span,
+            ));
+        }
+
+        TypedStatement {
+            kind: TypedStatementKind::Assignment(TypedAssignmentNode {
+                left: node.left.clone(),
+                right: typed_right,
+            }),
+            span: node.span,
+            terminates: false,
+        }
+    }
+
+    fn check_stmt_val(&mut self, node: &VarDecNode) -> TypedStatement {
+        let typed_initalizer = self.check_expr(&node.initalizer);
+
+        let mut typ: Type;
+
+        let old_span = self
+            .scopes
+            .last()
+            .unwrap()
+            .get(&node.name.value)
+            .map(|sym| sym.span);
+
+        if let Some(span) = old_span {
+            self.diagnose.push_error(CompileError::symbol_redefination(
+                node.name.value.clone(),
+                span,
+                node.name.span,
+                SymbolKind::Variable,
+            ));
+            typ = Type {
+                kind: TypeKind::Unknown,
+                span: node.var_type.span,
+            }
+        } else {
+            typ = self.resolve_types(&node.var_type);
+
+            if typ.kind != TypeKind::Unknown {
+                if typ.kind != typed_initalizer.typ {
+                    self.diagnose.push_error(CompileError::type_mismatch(
+                        typ.kind.clone(),
+                        typed_initalizer.typ.clone(),
+                        Span {
+                            // val x int = 12;
+                            //     ^^^^^
+                            start: node.name.span.start,
+                            end: typ.span.end,
+                        },
+                        typed_initalizer.span,
+                        "assign".into(),
+                    ));
+                }
+            } else {
+                typ = Type {
+                    span: node.name.span,
+                    kind: typed_initalizer.typ.clone(),
+                }
+            }
+
+            self.scopes.last_mut().unwrap().insert(
+                node.name.value.clone(),
+                Symbol {
+                    typ: typ.clone(),
+                    span: node.span,
+                    mutable: node.mutable,
+                },
+            );
+        }
+
+        TypedStatement {
+            kind: TypedStatementKind::VarDeclaration(TypedVarDecNode {
+                name: node.name.clone(),
+                var_type: typ,
+                initalizer: typed_initalizer,
+                mutable: node.mutable,
+            }),
+            span: node.span,
+            terminates: false,
+        }
+    }
+
+    fn check_stmt(&mut self, stmt: &Statement) -> TypedStatement {
+        match stmt {
+            Statement::VarDeclaration(node) => self.check_stmt_val(node),
+            Statement::Assignment(node) => self.check_stmt_assign(node),
+            Statement::If(node) => self.check_stmt_if(node),
+            Statement::While(node) => self.check_stmt_while(node),
+            Statement::FunDefinition(node) => self.check_stmt_fun(node),
+            Statement::Block(node) => self.check_stmt_block(node),
+            Statement::Expression(expr) => {
+                let typed_expr = self.check_expr(expr);
+                TypedStatement {
+                    span: typed_expr.span,
+                    kind: TypedStatementKind::Expression(typed_expr),
+                    terminates: false,
+                }
+            }
+            Statement::Return(node) => self.check_stmt_return(node),
+            Statement::Broken(span) => self.broken_typed_stmt(*span),
+        }
     }
 
     fn check_expr_field(&mut self, node: &FieldAccessNode) -> TypedExpression {
@@ -353,7 +698,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_expr_ident(&mut self, node: &IdentLiteralNode) -> TypedExpression {
-        let typ = self.resolve_symbol(&node.value);
+        let typ = self.resolve_symbol_type(&node.value);
         if typ == TypeKind::Unknown {
             self.diagnose
                 .push_error(CompileError::unknown_symbol(node.value.clone(), node.span));
@@ -395,10 +740,20 @@ impl<'a> TypeChecker<'a> {
         }
     }
 }
+impl TypedStatement {
+    fn into_block_node(self) -> TypedBlockNode {
+        match self.kind {
+            TypedStatementKind::Block(node) => node,
+            _ => unreachable!("this method for only block statements!"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct TypedStatement {
     kind: TypedStatementKind,
     span: Span,
+    terminates: bool,
 }
 #[derive(Debug)]
 pub(crate) enum TypedStatementKind {
@@ -504,5 +859,5 @@ pub(crate) struct TypedCallNode {
 
 #[derive(Debug)]
 pub(crate) struct TypedReturnNode {
-    value: TypedExpression,
+    value: Option<TypedExpression>,
 }

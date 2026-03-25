@@ -57,11 +57,25 @@ pub enum SemanticError {
         feature_name: String,
         span: Span,
     },
+    NotMutable {
+        val: String,
+        span: Span,
+    },
+    InvalidReturnLocation {
+        span: Span,
+    },
+    NestedFunction {
+        span: Span,
+    },
+    MissingReturn {
+        span: Span,
+    },
 }
 #[derive(Debug)]
 pub enum SymbolKind {
     Function,
     Variable,
+    Parameter,
 }
 
 #[derive(Debug)]
@@ -153,6 +167,18 @@ impl CompileError {
     pub fn feature_not_supported(feature_name: String, span: Span) -> Self {
         CompileError::Semantic(SemanticError::FeatureNotSupported { feature_name, span })
     }
+    pub fn not_mutable(val: String, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::NotMutable { val, span })
+    }
+    pub fn invalid_return_location(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::InvalidReturnLocation { span })
+    }
+    pub fn nested_function(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::NestedFunction { span })
+    }
+    pub fn missing_return(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::MissingReturn { span })
+    }
 }
 
 pub trait ErrorFormatter {
@@ -177,6 +203,10 @@ impl CompileError {
             Self::Semantic(SemanticError::NotCallable { span, .. }) => *span,
             Self::Semantic(SemanticError::DivideByZero { span }) => *span,
             Self::Semantic(SemanticError::FeatureNotSupported { span, .. }) => *span,
+            Self::Semantic(SemanticError::NotMutable { span, .. }) => *span,
+            Self::Semantic(SemanticError::InvalidReturnLocation { span, .. }) => *span,
+            Self::Semantic(SemanticError::NestedFunction { span }) => *span,
+            Self::Semantic(SemanticError::MissingReturn { span }) => *span,
         }
     }
 }

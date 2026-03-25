@@ -853,8 +853,8 @@ impl fmt::Debug for Statement {
     }
 }
 pub(crate) struct BlockNode {
-    body: Vec<Statement>,
-    span: Span,
+    pub body: Vec<Statement>,
+    pub span: Span,
 }
 impl fmt::Debug for BlockNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -891,11 +891,11 @@ impl fmt::Debug for FunDefNode {
 }
 
 pub(crate) struct IfNode {
-    condition: Expression,
-    then_branch: BlockNode,
-    else_if_branches: Vec<ElseIfNode>,
-    else_branch: Option<BlockNode>,
-    span: Span,
+    pub condition: Expression,
+    pub then_branch: BlockNode,
+    pub else_if_branches: Vec<ElseIfNode>,
+    pub else_branch: Option<BlockNode>,
+    pub span: Span,
 }
 impl fmt::Debug for IfNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -917,9 +917,9 @@ impl fmt::Debug for IfNode {
 }
 
 pub(crate) struct ElseIfNode {
-    condition: Expression,
-    then_branch: BlockNode,
-    span: Span,
+    pub condition: Expression,
+    pub then_branch: BlockNode,
+    pub span: Span,
 }
 impl fmt::Debug for ElseIfNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -939,9 +939,9 @@ impl fmt::Debug for ElseIfNode {
 }
 
 pub(crate) struct WhileNode {
-    condition: Expression,
-    body: BlockNode,
-    span: Span,
+    pub condition: Expression,
+    pub body: BlockNode,
+    pub span: Span,
 }
 impl fmt::Debug for WhileNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -958,11 +958,11 @@ impl fmt::Debug for WhileNode {
 }
 
 pub(crate) struct VarDecNode {
-    name: IdentLiteralNode,
-    var_type: IdentLiteralNode,
-    initalizer: Expression,
-    mutable: bool,
-    span: Span,
+    pub name: IdentLiteralNode,
+    pub var_type: IdentLiteralNode,
+    pub initalizer: Expression,
+    pub mutable: bool,
+    pub span: Span,
 }
 impl fmt::Debug for VarDecNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -981,9 +981,9 @@ impl fmt::Debug for VarDecNode {
 }
 
 pub(crate) struct AssignmentNode {
-    left: IdentLiteralNode,
-    right: Expression,
-    span: Span,
+    pub left: IdentLiteralNode,
+    pub right: Expression,
+    pub span: Span,
 }
 impl fmt::Debug for AssignmentNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1278,8 +1278,8 @@ impl fmt::Debug for IdentLiteralNode {
 }
 
 pub(crate) struct ReturnNode {
-    value: Option<Expression>,
-    span: Span,
+    pub value: Option<Expression>,
+    pub span: Span,
 }
 impl fmt::Debug for ReturnNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

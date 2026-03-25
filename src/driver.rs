@@ -59,6 +59,10 @@ impl Driver {
             );
         });
 
+        if self.diagnose.has_errors() || typed_statements.len() == 0 {
+            println!("The compiler stopped due to errors or missing expressions.");
+        }
+
         //println!("------------------------------------------------------------------------------");
         if self.diagnose.has_errors() {
             println!(
@@ -70,6 +74,7 @@ impl Driver {
             );
             self.diagnose.print_errors();
         }
+        println!("{} errors occured.", self.diagnose.errors_len());
     }
 }
 
