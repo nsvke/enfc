@@ -999,7 +999,7 @@ impl fmt::Debug for AssignmentNode {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum BinaryOperator {
     // Logical
     Or,
@@ -1132,9 +1132,9 @@ impl Expression {
 }
 
 pub(crate) struct IndexExpressionNode {
-    target: Box<Expression>,
-    index: Box<Expression>,
-    span: Span,
+    pub target: Box<Expression>,
+    pub index: Box<Expression>,
+    pub span: Span,
 }
 impl fmt::Debug for IndexExpressionNode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1150,9 +1150,9 @@ impl fmt::Debug for IndexExpressionNode {
     }
 }
 pub(crate) struct FieldAccessNode {
-    target: Box<Expression>,
-    field: IdentLiteralNode,
-    span: Span,
+    pub target: Box<Expression>,
+    pub field: IdentLiteralNode,
+    pub span: Span,
 }
 impl fmt::Debug for FieldAccessNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

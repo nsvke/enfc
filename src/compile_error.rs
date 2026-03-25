@@ -36,6 +36,27 @@ pub enum SemanticError {
         r_span: Span,
         op: String,
     },
+    NotCallable {
+        val: TypeKind,
+        span: Span,
+    },
+    MissingArgument {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+    UnexpectedType {
+        expected: TypeKind,
+        found: TypeKind,
+        span: Span,
+    },
+    DivideByZero {
+        span: Span,
+    },
+    FeatureNotSupported {
+        feature_name: String,
+        span: Span,
+    },
 }
 #[derive(Debug)]
 pub enum SymbolKind {
@@ -109,6 +130,29 @@ impl CompileError {
             op,
         })
     }
+    pub fn not_callable(val: TypeKind, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::NotCallable { val, span })
+    }
+    pub fn missing_argument(expected: usize, found: usize, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::MissingArgument {
+            expected,
+            found,
+            span,
+        })
+    }
+    pub fn unexpected_type(expected: TypeKind, found: TypeKind, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::UnexpectedType {
+            expected,
+            found,
+            span,
+        })
+    }
+    pub fn divide_by_zero(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::DivideByZero { span })
+    }
+    pub fn feature_not_supported(feature_name: String, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::FeatureNotSupported { feature_name, span })
+    }
 }
 
 pub trait ErrorFormatter {
@@ -128,6 +172,11 @@ impl CompileError {
                 start: l_span.start,
                 end: r_span.end,
             },
+            Self::Semantic(SemanticError::MissingArgument { span, .. }) => *span,
+            Self::Semantic(SemanticError::UnexpectedType { span, .. }) => *span,
+            Self::Semantic(SemanticError::NotCallable { span, .. }) => *span,
+            Self::Semantic(SemanticError::DivideByZero { span }) => *span,
+            Self::Semantic(SemanticError::FeatureNotSupported { span, .. }) => *span,
         }
     }
 }

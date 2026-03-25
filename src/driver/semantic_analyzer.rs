@@ -3,8 +3,8 @@
 use crate::compile_error::CompileError;
 use crate::diagnostic::Diagnostics;
 use crate::driver::parser::{
-    BinaryExpressionNode, BinaryOperator, CallNode, Expression, IdentLiteralNode, LiteralNode,
-    LiteralValue, Statement, UnaryExpressionNode, UnaryOperator,
+    BinaryExpressionNode, BinaryOperator, CallNode, Expression, FieldAccessNode, IdentLiteralNode,
+    IndexExpressionNode, LiteralNode, LiteralValue, Statement, UnaryExpressionNode, UnaryOperator,
 };
 use crate::structs::Span;
 use std::collections::{HashMap, hash_map::Entry};
@@ -164,15 +164,91 @@ impl<'a> SemanticAnalyzer<'a> {
         typ
     }
 
+    fn analyze_expr_field(&mut self, node: &FieldAccessNode) -> TypedExpression {
+        self.diagnose
+            .push_error(CompileError::feature_not_supported(
+                "FieldAccess".into(),
+                node.span,
+            ));
+        TypedExpression {
+            kind: TypedExpressionKind::FieldAccess(TypedFieldAccessNode {
+                target: Box::new(self.analyze_expression(&node.target)),
+                field: node.field.clone(),
+            }),
+            typ: TypeKind::Unknown,
+            span: node.span,
+        }
+    }
+
+    fn analyze_expr_index(&mut self, node: &IndexExpressionNode) -> TypedExpression {
+        self.diagnose
+            .push_error(CompileError::feature_not_supported(
+                "IndexAccess".into(),
+                node.span,
+            ));
+        TypedExpression {
+            kind: TypedExpressionKind::Index(TypedIndexExpressionNode {
+                target: Box::new(self.analyze_expression(&node.target)),
+                index: Box::new(self.analyze_expression(&node.index)),
+            }),
+            typ: TypeKind::Unknown,
+            span: node.span,
+        }
+    }
+
     fn analyze_expr_call(&mut self, node: &CallNode) -> TypedExpression {
         let typed_primary = self.analyze_expression(&node.primary);
 
-        if typed_primary.typ == TypeKind::Unknown {} // check error
+        let mut typ = TypeKind::Unknown;
 
-        // check is it callable
-        // check arguments
+        let mut arguments = Vec::new();
 
-        self.broken_typed_expr(Span::default()) // return real expr node
+        if typed_primary.typ != TypeKind::Unknown {
+            match &typed_primary.typ {
+                TypeKind::Function { params, ret } => {
+                    if node.arguments.len() != params.len() {
+                        self.diagnose.push_error(CompileError::missing_argument(
+                            params.len(),
+                            node.arguments.len(),
+                            typed_primary.span,
+                        ));
+                    }
+
+                    for (i, arg_expr) in node.arguments.iter().enumerate() {
+                        let typed_arg = self.analyze_expression(arg_expr);
+
+                        if let Some(expected_typ) = params.get(i) {
+                            if typed_arg.typ != expected_typ.kind {
+                                self.diagnose.push_error(CompileError::unexpected_type(
+                                    expected_typ.kind.clone(),
+                                    typed_arg.typ.clone(),
+                                    typed_arg.span,
+                                ));
+                            }
+                        }
+
+                        arguments.push(typed_arg);
+                    }
+
+                    typ = ret.kind.clone();
+                }
+                _ => {
+                    self.diagnose.push_error(CompileError::not_callable(
+                        typed_primary.typ.clone(),
+                        typed_primary.span,
+                    ));
+                }
+            };
+        }
+
+        TypedExpression {
+            kind: TypedExpressionKind::Call(TypedCallNode {
+                primary: Box::new(typed_primary),
+                arguments,
+            }),
+            typ,
+            span: node.span,
+        }
     }
 
     fn analyze_expr_binary(&mut self, node: &BinaryExpressionNode) -> TypedExpression {
@@ -202,7 +278,6 @@ impl<'a> SemanticAnalyzer<'a> {
         }
 
         if typ != TypeKind::Unknown {
-            // TODO add operator to type mismatch error
             if expected_op != TypeKind::Unknown {
                 if typed_left.typ != expected_op || typed_right.typ != expected_op {
                     self.diagnose.push_error(CompileError::type_mismatch(
@@ -224,6 +299,16 @@ impl<'a> SemanticAnalyzer<'a> {
                         format!("{:?}", node.op),
                     ));
                     typ = TypeKind::Unknown;
+                }
+            }
+        }
+
+        if node.op == BinaryOperator::Div {
+            if let TypedExpressionKind::Literal(lit) = &typed_right.kind {
+                if let LiteralValue::Number(0) = lit.value {
+                    self.diagnose
+                        .push_error(CompileError::divide_by_zero(node.span));
+                    typ = TypeKind::Unknown
                 }
             }
         }
@@ -299,19 +384,15 @@ impl<'a> SemanticAnalyzer<'a> {
 
     fn analyze_expression(&mut self, expr: &Expression) -> TypedExpression {
         match expr {
-            Expression::Binary(exp) => {}      //+
-            Expression::Unary(exp) => {}       //+
-            Expression::Literal(exp) => {}     //+
-            Expression::Ident(exp) => {}       //+
-            Expression::Call(exp) => {}        //
-            Expression::Index(exp) => {}       //
-            Expression::FieldAccess(exp) => {} //
-            Expression::Broken(span) => {
-                // self.broken_typed_expr(span)
-            }
-        };
-
-        self.broken_typed_expr(Span::default()) // mock return
+            Expression::Binary(node) => self.analyze_expr_binary(node),
+            Expression::Unary(node) => self.analyze_expr_unary(node),
+            Expression::Literal(node) => self.analyze_expr_literal(node),
+            Expression::Ident(node) => self.analyze_expr_ident(node),
+            Expression::Call(node) => self.analyze_expr_call(node),
+            Expression::Index(node) => self.analyze_expr_index(node),
+            Expression::FieldAccess(node) => self.analyze_expr_field(node),
+            Expression::Broken(span) => self.broken_typed_expr(*span),
+        }
     }
 }
 #[derive(Debug)]
