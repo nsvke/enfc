@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use crate::compile_error::{CompileError, SymbolKind};
+use crate::compile_error::{CompileError, MismatchKind, SymbolKind};
 use crate::diagnostic::Diagnostics;
 use crate::driver::parse::{
     AssignmentNode, BinaryExpressionNode, BinaryOperator, BlockNode, CallNode, Expression,
@@ -72,7 +72,7 @@ pub(crate) struct TypeChecker<'a> {
     scopes: Vec<HashMap<String, Symbol>>,
     diagnose: &'a mut Diagnostics,
     // destruct: bool,
-    expected_return_type: Option<TypeKind>,
+    expected_return: Option<(TypeKind, Span)>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -80,7 +80,7 @@ impl<'a> TypeChecker<'a> {
         let mut new_type_checker = Self {
             scopes: vec![HashMap::new()],
             diagnose,
-            expected_return_type: None,
+            expected_return: None,
         };
         new_type_checker.init();
         new_type_checker
@@ -112,7 +112,7 @@ impl<'a> TypeChecker<'a> {
         );
     }
 
-    pub(crate) fn check(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
+    pub(crate) fn check(mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
         self.check_and_collect(statements)
     }
 
@@ -227,7 +227,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_stmt_fun(&mut self, node: &FunDefNode) -> TypedStatement {
-        if self.expected_return_type.is_some() {
+        if self.expected_return.is_some() {
             self.diagnose
                 .push_error(CompileError::nested_function(Span {
                     start: node.name.span.start,
@@ -238,7 +238,15 @@ impl<'a> TypeChecker<'a> {
         }
 
         let typ = self.resolve_types(&node.ret_type); // if type could not resolve, this return Unknown
-        self.expected_return_type = Some(typ.kind.clone());
+        self.expected_return = Some((
+            typ.kind.clone(),
+            Span {
+                // fun main () nret {
+                //     ^^^^^^^^^^^^
+                start: node.name.span.start,
+                end: node.ret_type.span.end,
+            },
+        ));
 
         self.enter_scope();
 
@@ -285,7 +293,7 @@ impl<'a> TypeChecker<'a> {
 
         self.exit_scope();
 
-        self.expected_return_type = None;
+        self.expected_return = None;
 
         TypedStatement {
             kind: TypedStatementKind::FunDefinition(TypedFunDefNode {
@@ -406,7 +414,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_stmt_return(&mut self, node: &ReturnNode) -> TypedStatement {
+    fn check_stmt_ret(&mut self, node: &ReturnNode) -> TypedStatement {
         let (typed_value, typ) = match &node.value {
             Some(expr) => {
                 let typed = self.check_expr(expr);
@@ -416,17 +424,18 @@ impl<'a> TypeChecker<'a> {
             None => (None, TypeKind::Nret),
         };
 
-        match &self.expected_return_type {
-            Some(expected_typ) => {
+        match &self.expected_return {
+            Some((expected_typ, loc_span)) => {
                 if typ != TypeKind::Unknown && *expected_typ != typ {
                     let value_span = typed_value.as_ref().map(|v| v.span).unwrap_or(node.span);
 
                     self.diagnose.push_error(CompileError::type_mismatch(
                         expected_typ.clone(),
                         typ,
-                        node.span, // TODO add return location state in TypeChecker
+                        *loc_span,
                         value_span,
                         "ret".into(),
+                        MismatchKind::Return,
                     ));
                 }
             }
@@ -463,6 +472,7 @@ impl<'a> TypeChecker<'a> {
                         node.left.span,
                         typed_right.span,
                         "=".into(),
+                        MismatchKind::Regular,
                     ));
                 }
             }
@@ -533,6 +543,7 @@ impl<'a> TypeChecker<'a> {
                         },
                         typed_initalizer.span,
                         "=".into(),
+                        MismatchKind::Regular,
                     ));
                 }
             } else {
@@ -580,7 +591,7 @@ impl<'a> TypeChecker<'a> {
                     terminates: false,
                 }
             }
-            Statement::Return(node) => self.check_stmt_return(node),
+            Statement::Return(node) => self.check_stmt_ret(node),
             Statement::Broken(span) => self.broken_typed_stmt(*span),
         }
     }
@@ -707,6 +718,7 @@ impl<'a> TypeChecker<'a> {
                         typed_left.span,
                         typed_right.span,
                         format!("{:?}", node.op),
+                        MismatchKind::Binary,
                     ));
                     typ = TypeKind::Unknown;
                 }
@@ -718,6 +730,7 @@ impl<'a> TypeChecker<'a> {
                         typed_left.span,
                         typed_right.span,
                         format!("{:?}", node.op),
+                        MismatchKind::Binary,
                     ));
                     typ = TypeKind::Unknown;
                 }
@@ -831,9 +844,9 @@ impl TypedStatement {
 
 #[derive(Debug)]
 pub(crate) struct TypedStatement {
-    kind: TypedStatementKind,
-    span: Span,
-    terminates: bool,
+    pub kind: TypedStatementKind,
+    pub span: Span,
+    pub terminates: bool,
 }
 #[derive(Debug)]
 pub(crate) enum TypedStatementKind {
@@ -850,51 +863,51 @@ pub(crate) enum TypedStatementKind {
 
 #[derive(Debug)]
 pub(crate) struct TypedBlockNode {
-    body: Vec<TypedStatement>,
+    pub body: Vec<TypedStatement>,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedFunDefNode {
-    name: IdentLiteralNode,
-    parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
-    ret_type: Type,
-    body: TypedBlockNode,
+    pub name: IdentLiteralNode,
+    pub parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
+    pub ret_type: Type,
+    pub body: TypedBlockNode,
 }
 #[derive(Debug)]
 pub(crate) struct TypedIfNode {
-    condition: TypedExpression,
-    then_branch: TypedBlockNode,
-    else_if_branches: Vec<TypedElseIfNode>,
-    else_branch: Option<TypedBlockNode>,
+    pub condition: TypedExpression,
+    pub then_branch: TypedBlockNode,
+    pub else_if_branches: Vec<TypedElseIfNode>,
+    pub else_branch: Option<TypedBlockNode>,
 }
 #[derive(Debug)]
 pub(crate) struct TypedElseIfNode {
-    condition: TypedExpression,
-    then_branch: TypedBlockNode,
+    pub condition: TypedExpression,
+    pub then_branch: TypedBlockNode,
 }
 #[derive(Debug)]
 pub(crate) struct TypedWhileNode {
-    condition: TypedExpression,
-    body: TypedBlockNode,
+    pub condition: TypedExpression,
+    pub body: TypedBlockNode,
 }
 #[derive(Debug)]
 pub(crate) struct TypedVarDecNode {
-    name: IdentLiteralNode,
-    var_type: Type,
-    initalizer: TypedExpression,
-    mutable: bool,
+    pub name: IdentLiteralNode,
+    pub var_type: Type,
+    pub initalizer: TypedExpression,
+    pub mutable: bool,
 }
 #[derive(Debug)]
 pub(crate) struct TypedAssignmentNode {
-    left: IdentLiteralNode,
-    right: TypedExpression,
+    pub left: IdentLiteralNode,
+    pub right: TypedExpression,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedExpression {
-    kind: TypedExpressionKind,
-    typ: TypeKind,
-    span: Span,
+    pub kind: TypedExpressionKind,
+    pub typ: TypeKind,
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -911,33 +924,33 @@ pub(crate) enum TypedExpressionKind {
 
 #[derive(Debug)]
 pub(crate) struct TypedIndexExpressionNode {
-    target: Box<TypedExpression>,
-    index: Box<TypedExpression>,
+    pub target: Box<TypedExpression>,
+    pub index: Box<TypedExpression>,
 }
 #[derive(Debug)]
 pub(crate) struct TypedFieldAccessNode {
-    target: Box<TypedExpression>,
-    field: IdentLiteralNode,
+    pub target: Box<TypedExpression>,
+    pub field: IdentLiteralNode,
 }
 #[derive(Debug)]
 pub(crate) struct TypedBinaryExpressionNode {
-    left: Box<TypedExpression>,
-    op: BinaryOperator,
-    right: Box<TypedExpression>,
+    pub left: Box<TypedExpression>,
+    pub op: BinaryOperator,
+    pub right: Box<TypedExpression>,
 }
 #[derive(Debug)]
 pub(crate) struct TypedUnaryExpressionNode {
-    operator: UnaryOperator,
-    operand: Box<TypedExpression>,
+    pub operator: UnaryOperator,
+    pub operand: Box<TypedExpression>,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedCallNode {
-    primary: Box<TypedExpression>,
-    arguments: Vec<TypedExpression>,
+    pub primary: Box<TypedExpression>,
+    pub arguments: Vec<TypedExpression>,
 }
 
 #[derive(Debug)]
 pub(crate) struct TypedReturnNode {
-    value: Option<TypedExpression>,
+    pub value: Option<TypedExpression>,
 }

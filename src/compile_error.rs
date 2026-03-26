@@ -36,6 +36,7 @@ pub enum SemanticError {
         l_span: Span,
         r_span: Span,
         op: String,
+        kind: MismatchKind,
     },
     NotCallable {
         val: TypeKind,
@@ -78,6 +79,12 @@ pub enum SymbolKind {
     Variable,
     Parameter,
     Builtin,
+}
+#[derive(Debug, PartialEq)]
+pub enum MismatchKind {
+    Regular,
+    Return,
+    Binary,
 }
 
 #[derive(Debug)]
@@ -137,6 +144,7 @@ impl CompileError {
         l_span: Span,
         r_span: Span,
         op: String,
+        kind: MismatchKind,
     ) -> Self {
         CompileError::Semantic(SemanticError::TypeMismatch {
             l_typ,
@@ -144,6 +152,7 @@ impl CompileError {
             l_span,
             r_span,
             op,
+            kind,
         })
     }
     pub fn not_callable(val: TypeKind, span: Span) -> Self {

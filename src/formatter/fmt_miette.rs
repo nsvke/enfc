@@ -10,7 +10,9 @@ pub mod fmt_miette_impl {
 
     use super::super::ErrorFormatter;
     use crate::{
-        compile_error::{CompileError, LexicalError, ParsingError, SemanticError, SymbolKind},
+        compile_error::{
+            CompileError, LexicalError, MismatchKind, ParsingError, SemanticError, SymbolKind,
+        },
         driver::TokenKind,
     };
 
@@ -127,6 +129,27 @@ pub mod fmt_miette_impl {
                     };
                     Some(Box::new(labels.into_iter()))
                 }
+                CompileError::Semantic(SemanticError::TypeMismatch {
+                    l_typ,
+                    r_typ,
+                    l_span,
+                    r_span,
+                    op,
+                    kind,
+                }) if *kind == MismatchKind::Return => {
+                    let labels = vec![
+                        LabeledSpan::new_with_span(
+                            Some(format!("ret type defined '{}' here", l_typ)),
+                            (l_span.start, l_span.end - l_span.start),
+                        ),
+                        LabeledSpan::new_with_span(
+                            Some(format!("but returned '{}' here", r_typ)),
+                            (r_span.start, r_span.end - r_span.start),
+                        ),
+                    ];
+
+                    Some(Box::new(labels.into_iter()))
+                }
                 _ => {
                     let label = LabeledSpan::new_with_span(Some(label_text), (span.start, len));
                     Some(Box::new(vec![label].into_iter()))
@@ -201,14 +224,27 @@ pub mod fmt_miette_impl {
                     write!(f, "cannot apply unary operator `{}` to type `{}`", op, val)
                 }
                 CompileError::Semantic(SemanticError::TypeMismatch {
-                    l_typ, r_typ, op, ..
-                }) => {
-                    write!(
-                        f,
-                        "for operator '{}', types mismatched -> expected '{}' but found '{}'",
-                        op, l_typ, r_typ
-                    )
-                }
+                    l_typ,
+                    r_typ,
+                    op,
+                    kind,
+                    ..
+                }) => match kind {
+                    MismatchKind::Binary => {
+                        write!(
+                            f,
+                            "cannot apply operator '{}' to types '{}' and '{}'",
+                            op, l_typ, r_typ
+                        )
+                    }
+                    MismatchKind::Regular | MismatchKind::Return => {
+                        write!(
+                            f,
+                            "types mismatched for '{}', expected '{}' but found '{}'",
+                            op, l_typ, r_typ
+                        )
+                    }
+                },
                 CompileError::Semantic(SemanticError::MissingArgument {
                     expected, found, ..
                 }) => {
