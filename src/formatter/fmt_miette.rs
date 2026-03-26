@@ -44,21 +44,94 @@ pub mod fmt_miette_impl {
                 CompileError::Lexical(LexicalError::UnterminatedLiteral { .. }) => {
                     "unterminated literal here".into()
                 }
-                CompileError::Semantic(SemanticError::SymbolRedefination { kind, .. }) => {
-                    match kind {
-                        SymbolKind::Function => "function redefination here".into(),
-                        SymbolKind::Variable => "variable redefination here".into(),
-                        SymbolKind::Parameter => "parameter redefination here".into(),
-                    }
-                }
+                CompileError::Semantic(SemanticError::SymbolRedefinition {
+                    name,
+                    old_span,
+                    new_span,
+                    kind,
+                }) => match kind {
+                    SymbolKind::Function => "function redefinition here".into(),
+                    SymbolKind::Variable => "variable redefinition here".into(),
+                    SymbolKind::Parameter => "parameter redefinition here".into(),
+                    SymbolKind::Builtin => "builtin redefinition here".into(),
+                },
                 CompileError::Semantic(SemanticError::UnknownType { .. }) => {
                     "this is not a type".into()
+                }
+                CompileError::Semantic(SemanticError::DivideByZero { .. }) => {
+                    "divide by zero here".into()
+                }
+                CompileError::Semantic(SemanticError::UnknownType { .. }) => {
+                    "unknown type here".into()
+                }
+                CompileError::Semantic(SemanticError::UnknownSymbol { .. }) => {
+                    "unknown symbol here".into()
+                }
+                CompileError::Semantic(SemanticError::NotUnaryType { .. }) => {
+                    "this is not unary type".into()
+                }
+                CompileError::Semantic(SemanticError::TypeMismatch { .. }) => {
+                    "type mismatch here".into()
+                }
+                CompileError::Semantic(SemanticError::MissingArgument { .. }) => {
+                    "missing argument here".into()
+                }
+                CompileError::Semantic(SemanticError::UnexpectedType { .. }) => {
+                    "unexpected type here".into()
+                }
+                CompileError::Semantic(SemanticError::NotCallable { .. }) => {
+                    "this is not callable".into()
+                }
+                CompileError::Semantic(SemanticError::FeatureNotSupported { .. }) => {
+                    "this is not supported".into()
+                }
+                CompileError::Semantic(SemanticError::NotMutable { .. }) => {
+                    "this is not mutable".into()
+                }
+                CompileError::Semantic(SemanticError::InvalidReturnLocation { .. }) => {
+                    "this location is not a function body".into()
+                }
+                CompileError::Semantic(SemanticError::NestedFunction { .. }) => {
+                    "nested function here".into()
+                }
+                CompileError::Semantic(SemanticError::MissingReturn { .. }) => {
+                    "missing return here".into()
                 }
                 _ => "error here".into(),
             };
 
-            let label = LabeledSpan::new_with_span(Some(label_text), (span.start, len));
-            Some(Box::new(vec![label].into_iter()))
+            // TODO combine this match with match above
+            match &self.error {
+                CompileError::Semantic(SemanticError::SymbolRedefinition {
+                    name,
+                    old_span,
+                    new_span,
+                    kind,
+                }) => {
+                    let labels = if old_span.start == 0 && old_span.end == 0 {
+                        vec![LabeledSpan::new_with_span(
+                            Some("redefined here".into()),
+                            (new_span.start, new_span.end - new_span.start),
+                        )]
+                    } else {
+                        vec![
+                            LabeledSpan::new_with_span(
+                                Some("first defined here".into()),
+                                (old_span.start, old_span.end - old_span.start),
+                            ),
+                            LabeledSpan::new_with_span(
+                                Some("redefined here".into()),
+                                (new_span.start, new_span.end - new_span.start),
+                            ),
+                        ]
+                    };
+                    Some(Box::new(labels.into_iter()))
+                }
+                _ => {
+                    let label = LabeledSpan::new_with_span(Some(label_text), (span.start, len));
+                    Some(Box::new(vec![label].into_iter()))
+                }
+            }
         }
         fn source_code(&self) -> Option<&dyn miette::SourceCode> {
             Some(&self.source_code)
@@ -71,7 +144,7 @@ pub mod fmt_miette_impl {
                 CompileError::Parsing(ParsingError::UnexpectedToken { .. }) => {
                     Some(Box::new("UnexpectedToken"))
                 }
-                CompileError::Semantic(_) => Some(Box::new("S001")),
+                CompileError::Semantic(_) => Some(Box::new("SemanticError")), // TODO add semantic error codes
                 _ => None,
             };
             None
@@ -103,14 +176,80 @@ pub mod fmt_miette_impl {
                     write!(f, "Unterminated literal '{}'", value)
                 }
                 CompileError::Parsing(ParsingError::UnexpectedToken {
-                    expected,
-                    found,
-                    span,
+                    expected, found, ..
                 }) => {
                     write!(f, "expected '{:?}', found '{:?}'", expected, found)
                 }
-                CompileError::Semantic(_) => {
-                    write!(f, "semantic error..")
+                CompileError::Semantic(SemanticError::SymbolRedefinition {
+                    name, kind, ..
+                }) => {
+                    // TODO fix this format
+                    write!(
+                        f,
+                        "{} '{}' is already defined",
+                        format!("{:?}", kind).to_lowercase(),
+                        name
+                    )
+                }
+                CompileError::Semantic(SemanticError::UnknownType { val, .. }) => {
+                    write!(f, "cannot find type `{}`", val)
+                }
+                CompileError::Semantic(SemanticError::UnknownSymbol { val, .. }) => {
+                    write!(f, "cannot find value `{}` in this scope", val)
+                }
+                CompileError::Semantic(SemanticError::NotUnaryType { val, op, .. }) => {
+                    write!(f, "cannot apply unary operator `{}` to type `{}`", op, val)
+                }
+                CompileError::Semantic(SemanticError::TypeMismatch {
+                    l_typ, r_typ, op, ..
+                }) => {
+                    write!(
+                        f,
+                        "for operator '{}', types mismatched -> expected '{}' but found '{}'",
+                        op, l_typ, r_typ
+                    )
+                }
+                CompileError::Semantic(SemanticError::MissingArgument {
+                    expected, found, ..
+                }) => {
+                    write!(
+                        f,
+                        "this method takes {} argument but {} arguments were supplied",
+                        expected, found
+                    )
+                }
+                CompileError::Semantic(SemanticError::UnexpectedType {
+                    span,
+                    expected,
+                    found,
+                }) => {
+                    write!(f, "expected type '{}' but found '{}'", expected, found)
+                }
+                CompileError::Semantic(SemanticError::NotCallable { val, .. }) => {
+                    write!(f, "{} is not a callable type", val)
+                }
+                CompileError::Semantic(SemanticError::DivideByZero { .. }) => {
+                    write!(f, "this operation will panic at runtime")
+                }
+                CompileError::Semantic(SemanticError::FeatureNotSupported {
+                    feature_name, ..
+                }) => {
+                    write!(f, "{} is not supported yet", feature_name)
+                }
+                CompileError::Semantic(SemanticError::NotMutable { val, .. }) => {
+                    write!(f, "cannot assign twice to immutable variable `{}`", val)
+                }
+                CompileError::Semantic(SemanticError::InvalidReturnLocation { .. }) => {
+                    write!(f, "this return is not in a function")
+                }
+                CompileError::Semantic(SemanticError::NestedFunction { .. }) => {
+                    write!(f, "nested functions is not supported")
+                }
+                CompileError::Semantic(SemanticError::MissingReturn { .. }) => {
+                    write!(
+                        f,
+                        "implicitly returns `nret` as its body has no `ret` expression"
+                    )
                 }
             }
         }

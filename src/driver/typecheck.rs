@@ -8,8 +8,19 @@ use crate::driver::parse::{
     LiteralValue, ReturnNode, Statement, UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
 };
 use crate::structs::Span;
+use phf::{Map, phf_map};
 use std::collections::{HashMap, hash_map::Entry};
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
+
+static RESERVED: Map<&'static str, TypeKind> = phf_map! {
+    "true" => TypeKind::Bool,
+    "false" => TypeKind::Bool,
+    "nret" => TypeKind::Unknown,
+    "int" => TypeKind::Unknown,
+    "str" => TypeKind::Unknown,
+    "bool" => TypeKind::Unknown,
+    "chr" => TypeKind::Unknown,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Type {
@@ -35,6 +46,20 @@ pub enum TypeKind {
     Unknown,
 }
 
+impl std::fmt::Display for TypeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int => write!(f, "int"),
+            Self::Str => write!(f, "str"),
+            Self::Bool => write!(f, "bool"),
+            Self::Char => write!(f, "chr"),
+            Self::Nret => write!(f, "nret"),
+            Self::Function { params, ret } => write!(f, "function"),
+            Self::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Symbol {
     pub typ: Type,
@@ -52,12 +77,41 @@ pub(crate) struct TypeChecker<'a> {
 
 impl<'a> TypeChecker<'a> {
     pub(crate) fn new(diagnose: &'a mut Diagnostics) -> Self {
-        Self {
+        let mut new_type_checker = Self {
             scopes: vec![HashMap::new()],
             diagnose,
             expected_return_type: None,
-        }
+        };
+        new_type_checker.init();
+        new_type_checker
     }
+
+    fn init(&mut self) {
+        // TODO add init list <name, Symbol> and init them with for
+        self.scopes[0].insert(
+            "true".into(),
+            Symbol {
+                typ: Type {
+                    span: Span::default(),
+                    kind: TypeKind::Bool,
+                },
+                span: Span::default(),
+                mutable: false,
+            },
+        );
+        self.scopes[0].insert(
+            "false".into(),
+            Symbol {
+                typ: Type {
+                    span: Span::default(),
+                    kind: TypeKind::Bool,
+                },
+                span: Span::default(),
+                mutable: false,
+            },
+        );
+    }
+
     pub(crate) fn check(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
         self.check_and_collect(statements)
     }
@@ -118,7 +172,7 @@ impl<'a> TypeChecker<'a> {
         for stmt in statements {
             match stmt {
                 Statement::FunDefinition(node) => {
-                    // TODO check redefination first, resolve types later
+                    // TODO check redefinition first, resolve types later
                     let params = node
                         .parameters
                         .iter()
@@ -127,11 +181,11 @@ impl<'a> TypeChecker<'a> {
                     let ret_typ = self.resolve_types(&node.ret_type);
                     match self.scopes[0].entry(node.name.value.clone()) {
                         Entry::Occupied(occupied_entry) => {
-                            self.diagnose.push_error(CompileError::symbol_redefination(
+                            self.diagnose.push_error(CompileError::symbol_redefinition(
                                 node.name.value.clone(),
                                 occupied_entry.get().span,
                                 node.name.span,
-                                crate::compile_error::SymbolKind::Function,
+                                SymbolKind::Function,
                             ))
                         }
                         Entry::Vacant(entry) => {
@@ -175,7 +229,10 @@ impl<'a> TypeChecker<'a> {
     fn check_stmt_fun(&mut self, node: &FunDefNode) -> TypedStatement {
         if self.expected_return_type.is_some() {
             self.diagnose
-                .push_error(CompileError::nested_function(node.name.span));
+                .push_error(CompileError::nested_function(Span {
+                    start: node.name.span.start,
+                    end: node.ret_type.span.end,
+                }));
 
             return self.broken_typed_stmt(node.span);
         }
@@ -186,15 +243,23 @@ impl<'a> TypeChecker<'a> {
         self.enter_scope();
 
         for param in &node.parameters {
+            if let Some(reserved) = RESERVED.get(&param.0.value) {
+                self.diagnose.push_error(CompileError::symbol_redefinition(
+                    param.0.value.clone(),
+                    Span::default(),
+                    param.0.span,
+                    SymbolKind::Builtin,
+                ));
+                continue;
+            }
             let symbol = Symbol {
                 span: param.0.span,
                 mutable: false,
                 typ: self.resolve_types(&param.1),
             };
-
             match self.scopes.last_mut().unwrap().entry(param.0.value.clone()) {
                 Entry::Occupied(occupied_entry) => {
-                    self.diagnose.push_error(CompileError::symbol_redefination(
+                    self.diagnose.push_error(CompileError::symbol_redefinition(
                         param.0.value.clone(),
                         occupied_entry.get().span,
                         param.0.span,
@@ -211,10 +276,10 @@ impl<'a> TypeChecker<'a> {
 
         if typ.kind != TypeKind::Nret && typ.kind != TypeKind::Unknown && !typed_body.terminates {
             self.diagnose.push_error(CompileError::missing_return(Span {
-                // fun main () { -- fun main () nret {
-                //     ^^^^^^^^^        ^^^^^^^^^^^^^^
+                // fun main () nret {
+                //     ^^^^^^^^^^^^
                 start: node.name.span.start,
-                end: node.body.span.start,
+                end: node.ret_type.span.end,
             }));
         }
 
@@ -361,7 +426,7 @@ impl<'a> TypeChecker<'a> {
                         typ,
                         node.span, // TODO add return location state in TypeChecker
                         value_span,
-                        "return".into(),
+                        "ret".into(),
                     ));
                 }
             }
@@ -397,7 +462,7 @@ impl<'a> TypeChecker<'a> {
                         typed_right.typ.clone(),
                         node.left.span,
                         typed_right.span,
-                        "assign".into(),
+                        "=".into(),
                     ));
                 }
             }
@@ -430,8 +495,19 @@ impl<'a> TypeChecker<'a> {
             .get(&node.name.value)
             .map(|sym| sym.span);
 
-        if let Some(span) = old_span {
-            self.diagnose.push_error(CompileError::symbol_redefination(
+        if let Some(reserved) = RESERVED.get(&node.name.value) {
+            self.diagnose.push_error(CompileError::symbol_redefinition(
+                node.name.value.clone(),
+                Span::default(),
+                node.name.span,
+                SymbolKind::Builtin,
+            ));
+            typ = Type {
+                kind: TypeKind::Unknown,
+                span: node.var_type.span,
+            }
+        } else if let Some(span) = old_span {
+            self.diagnose.push_error(CompileError::symbol_redefinition(
                 node.name.value.clone(),
                 span,
                 node.name.span,
@@ -456,7 +532,7 @@ impl<'a> TypeChecker<'a> {
                             end: typ.span.end,
                         },
                         typed_initalizer.span,
-                        "assign".into(),
+                        "=".into(),
                     ));
                 }
             } else {
@@ -683,6 +759,10 @@ impl<'a> TypeChecker<'a> {
             self.diagnose.push_error(CompileError::not_unary_type(
                 format!("{:?}", typed_operand.typ),
                 typed_operand.span,
+                match node.operator {
+                    UnaryOperator::Neg => '-',
+                    UnaryOperator::Not => '!',
+                },
             ));
             typ = TypeKind::Unknown;
         }

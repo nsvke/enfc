@@ -11,7 +11,7 @@ pub enum CompileError {
 
 #[derive(Debug)]
 pub enum SemanticError {
-    SymbolRedefination {
+    SymbolRedefinition {
         name: String,
         old_span: Span,
         new_span: Span,
@@ -28,6 +28,7 @@ pub enum SemanticError {
     NotUnaryType {
         val: String,
         span: Span,
+        op: char,
     },
     TypeMismatch {
         l_typ: TypeKind,
@@ -76,6 +77,7 @@ pub enum SymbolKind {
     Function,
     Variable,
     Parameter,
+    Builtin,
 }
 
 #[derive(Debug)]
@@ -107,13 +109,13 @@ impl CompileError {
             span,
         })
     }
-    pub fn symbol_redefination(
+    pub fn symbol_redefinition(
         name: String,
         old_span: Span,
         new_span: Span,
         kind: SymbolKind,
     ) -> Self {
-        CompileError::Semantic(SemanticError::SymbolRedefination {
+        CompileError::Semantic(SemanticError::SymbolRedefinition {
             name,
             old_span,
             new_span,
@@ -126,8 +128,8 @@ impl CompileError {
     pub fn unknown_symbol(val: String, span: Span) -> Self {
         CompileError::Semantic(SemanticError::UnknownSymbol { val, span })
     }
-    pub fn not_unary_type(val: String, span: Span) -> Self {
-        CompileError::Semantic(SemanticError::NotUnaryType { val, span })
+    pub fn not_unary_type(val: String, span: Span, op: char) -> Self {
+        CompileError::Semantic(SemanticError::NotUnaryType { val, span, op })
     }
     pub fn type_mismatch(
         l_typ: TypeKind,
@@ -190,7 +192,7 @@ impl CompileError {
         match self {
             Self::Lexical(LexicalError::UnterminatedLiteral { span, .. }) => *span,
             Self::Parsing(ParsingError::UnexpectedToken { span, .. }) => *span,
-            Self::Semantic(SemanticError::SymbolRedefination { new_span, .. }) => *new_span,
+            Self::Semantic(SemanticError::SymbolRedefinition { new_span, .. }) => *new_span,
             Self::Semantic(SemanticError::UnknownType { span, .. }) => *span,
             Self::Semantic(SemanticError::UnknownSymbol { span, .. }) => *span,
             Self::Semantic(SemanticError::NotUnaryType { span, .. }) => *span,
