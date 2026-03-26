@@ -67,7 +67,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn parse(&mut self) -> Vec<Statement> {
+    pub(crate) fn parse(mut self) -> Vec<Statement> {
         let mut statements = Vec::new();
         while self.pos < self.tokens.len() {
             if let Some(stmt) = self.parse_statement() {
@@ -87,34 +87,24 @@ impl<'a> Parser<'a> {
             While => Some(self.parse_while()),
             OpenBrace => Some(self.parse_block()),
             Ret => Some(self.parse_ret()),
-            Ident(_) => match self.peek_at(1).kind {
-                Eq => Some(self.parse_asgn()),
-                OpenParam => Some(Statement::Expression(self.parse_expr_stmt())),
-                _ => {
-                    self.diagnose.push_error(CompileError::unexpected_token(
-                        Any,
-                        self.peek().kind.clone(),
-                        self.peek().span,
-                    ));
-                    self.consume_quietly();
-                    Some(self.sync())
-                } //_ => Some(Statement::Expression(self.parse_expr())),
-            },
+            Ident(_) if self.peek_at(1).kind == Eq => Some(self.parse_asgn()),
+            Ident(_) | Literal(_) | OpenParam | Bang | Minus => {
+                Some(Statement::Expression(self.parse_expr_stmt()))
+            }
             Semi | Eof => {
                 self.consume_quietly();
                 None
             }
-            _ => Some(Statement::Expression(self.parse_expr_stmt())),
-            // _ => {
-            //     // ignore other tokens for now
-            //     self.diagnose.push_error(CompileError::unexpected_token(
-            //         Any,
-            //         self.peek().kind.clone(),
-            //         self.peek().span,
-            //     ));
-            //     self.consume_quietly();
-            //     Some(self.sync())
-            // }
+            _ => {
+                // ignore other tokens for now
+                self.diagnose.push_error(CompileError::unexpected_token(
+                    Any,
+                    self.peek().kind.clone(),
+                    self.peek().span,
+                ));
+                self.consume_quietly();
+                Some(self.sync())
+            }
         }
     }
 
@@ -194,7 +184,12 @@ impl<'a> Parser<'a> {
         // let expr = match self.peek().kind {
         //     _ => Some(self.parse_expr()),
         // };
-        let expr = Some(self.parse_expr());
+
+        let expr = if self.peek().kind != Semi {
+            Some(self.parse_expr())
+        } else {
+            None
+        };
 
         let semi_token = match self.expect(Semi) {
             Ok(t) => t,
@@ -517,15 +512,13 @@ impl<'a> Parser<'a> {
     fn sync_span(&mut self) -> Span {
         let start = self.peek().span.start;
         let mut end = self.peek().span.end;
-        while self.pos < self.tokens.len() - 1 {
+
+        loop {
             let token = self.peek();
             end = token.span.end;
             match token.kind {
-                Semi | OpenBrace => {
-                    let end = token.span.end;
-                    return Span { start, end };
-                }
-                CloseBrace | CloseBracket | CloseParam | Eof => {
+                Semi | OpenBrace | CloseBrace | CloseBracket | CloseParam | Eof | Val | Var
+                | If | Fun | While | Ret | Ident(_) | Literal(_) | OpenParam | Bang | Minus => {
                     return Span {
                         start,
                         end: token.span.start,
@@ -1290,7 +1283,7 @@ impl fmt::Debug for ReturnNode {
         )?;
         match &self.value {
             Some(v) => v.fmt(f),
-            Option::None => write!(f, "Void"),
+            Option::None => write!(f, "nret"),
         }
     }
 }
