@@ -1,3 +1,4 @@
+mod irgen;
 mod lex;
 mod parse;
 mod typecheck;
@@ -5,7 +6,7 @@ mod typecheck;
 use crate::{
     config::Config,
     diagnostic::Diagnostics,
-    driver::{lex::Lexer, parse::Parser, typecheck::TypeChecker},
+    driver::{irgen::IrGenerator, lex::Lexer, parse::Parser, typecheck::TypeChecker},
 };
 
 pub use lex::{Token, TokenKind};
@@ -35,7 +36,7 @@ impl Driver {
             );
         });
 
-        let mut parser = Parser::new(&tokens, &mut self.diagnose);
+        let parser = Parser::new(&tokens, &mut self.diagnose);
         let statements = parser.parse();
         println!("------------------------------------------------------------------------------");
         println!("Statement List");
@@ -47,7 +48,7 @@ impl Driver {
             );
         });
 
-        let mut typechecker = TypeChecker::new(&mut self.diagnose);
+        let typechecker = TypeChecker::new(&mut self.diagnose);
         let typed_statements = typechecker.check(&statements);
         println!("------------------------------------------------------------------------------");
         println!("TypedStatement List");
@@ -59,10 +60,6 @@ impl Driver {
             );
         });
 
-        if self.diagnose.has_errors() || typed_statements.len() == 0 {
-            println!("The compiler stopped due to errors or missing expressions.");
-        }
-
         //println!("------------------------------------------------------------------------------");
         if self.diagnose.has_errors() {
             println!(
@@ -73,8 +70,25 @@ impl Driver {
                 "------------------------------------------------------------------------------\x1b[0m"
             );
             self.diagnose.print_errors();
+            println!("{} errors occured.", self.diagnose.errors_len());
+            return;
         }
-        println!("{} errors occured.", self.diagnose.errors_len());
+
+        if typed_statements.len() == 0 {
+            return;
+        }
+
+        let irgen = IrGenerator::new();
+        let ir = irgen.generate_from(&typed_statements);
+        println!("------------------------------------------------------------------------------");
+        println!("IR List");
+        println!("------------------------------------------------------------------------------");
+        ir.iter().for_each(|t| {
+            println!("{:?}", *t);
+            println!(
+                "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
+            );
+        });
     }
 }
 
