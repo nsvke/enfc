@@ -65,6 +65,7 @@ pub(crate) struct Symbol {
     pub typ: Type,
     pub span: Span,
     pub mutable: bool,
+    pub id: usize,
 }
 
 pub(crate) struct TypeChecker<'a> {
@@ -73,6 +74,7 @@ pub(crate) struct TypeChecker<'a> {
     diagnose: &'a mut Diagnostics,
     // destruct: bool,
     expected_return: Option<(TypeKind, Span)>,
+    next_ident_id: usize,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -81,6 +83,7 @@ impl<'a> TypeChecker<'a> {
             scopes: vec![HashMap::new()],
             diagnose,
             expected_return: None,
+            next_ident_id: 1,
         };
         new_type_checker.init();
         new_type_checker
@@ -88,6 +91,7 @@ impl<'a> TypeChecker<'a> {
 
     fn init(&mut self) {
         // TODO add init list <name, Symbol> and init them with for
+        let id1 = self.give_ident_id();
         self.scopes[0].insert(
             "true".into(),
             Symbol {
@@ -97,8 +101,10 @@ impl<'a> TypeChecker<'a> {
                 },
                 span: Span::default(),
                 mutable: false,
+                id: id1,
             },
         );
+        let id2 = self.give_ident_id();
         self.scopes[0].insert(
             "false".into(),
             Symbol {
@@ -108,6 +114,7 @@ impl<'a> TypeChecker<'a> {
                 },
                 span: Span::default(),
                 mutable: false,
+                id: id2,
             },
         );
     }
@@ -170,6 +177,7 @@ impl<'a> TypeChecker<'a> {
 
     fn collect_signatures(&mut self, statements: &'a [Statement]) {
         for stmt in statements {
+            let id = self.give_ident_id();
             match stmt {
                 Statement::FunDefinition(node) => {
                     // TODO check redefinition first, resolve types later
@@ -199,12 +207,26 @@ impl<'a> TypeChecker<'a> {
                                 },
                                 span: node.span,
                                 mutable: false,
+                                id,
                             });
                         }
                     };
                 }
                 _ => {}
             };
+        }
+    }
+
+    fn give_ident_id(&mut self) -> usize {
+        let next_id = self.next_ident_id;
+        self.next_ident_id += 1;
+        next_id
+    }
+
+    fn make_ident_id(&mut self, node: &IdentLiteralNode) -> IdentLiteralIdNode {
+        IdentLiteralIdNode {
+            value_id: self.give_ident_id(),
+            span: node.span,
         }
     }
 
@@ -215,6 +237,15 @@ impl<'a> TypeChecker<'a> {
             }
         }
         TypeKind::Unknown
+    }
+
+    fn resolve_symbol_type_with_id(&mut self, s: &str) -> (TypeKind, usize) {
+        for scope in self.scopes.iter().rev() {
+            if let Some(symbol) = scope.get(s) {
+                return (symbol.typ.kind.clone(), symbol.id);
+            }
+        }
+        (TypeKind::Unknown, 0)
     }
 
     fn resolve_symbol(&self, s: &str) -> Option<Symbol> {
@@ -264,6 +295,7 @@ impl<'a> TypeChecker<'a> {
                 span: param.0.span,
                 mutable: false,
                 typ: self.resolve_types(&param.1),
+                id: self.give_ident_id(),
             };
             match self.scopes.last_mut().unwrap().entry(param.0.value.clone()) {
                 Entry::Occupied(occupied_entry) => {
@@ -553,19 +585,21 @@ impl<'a> TypeChecker<'a> {
                 }
             }
 
+            let id = self.give_ident_id();
             self.scopes.last_mut().unwrap().insert(
                 node.name.value.clone(),
                 Symbol {
                     typ: typ.clone(),
                     span: node.span,
                     mutable: node.mutable,
+                    id,
                 },
             );
         }
 
         TypedStatement {
             kind: TypedStatementKind::VarDeclaration(TypedVarDecNode {
-                name: node.name.clone(),
+                name_id: self.make_ident_id(&node.name),
                 var_type: typ,
                 initalizer: typed_initalizer,
                 mutable: node.mutable,
@@ -791,13 +825,16 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_expr_ident(&mut self, node: &IdentLiteralNode) -> TypedExpression {
-        let typ = self.resolve_symbol_type(&node.value);
+        let (typ, id) = self.resolve_symbol_type_with_id(&node.value);
         if typ == TypeKind::Unknown {
             self.diagnose
                 .push_error(CompileError::unknown_symbol(node.value.clone(), node.span));
         }
         TypedExpression {
-            kind: TypedExpressionKind::Ident(node.clone()),
+            kind: TypedExpressionKind::Ident(IdentLiteralTuple {
+                val: node.value.clone(),
+                id,
+            }),
             typ,
             span: node.span,
         }
@@ -892,7 +929,7 @@ pub(crate) struct TypedWhileNode {
 }
 #[derive(Debug)]
 pub(crate) struct TypedVarDecNode {
-    pub name: IdentLiteralNode,
+    pub name_id: IdentLiteralIdNode,
     pub var_type: Type,
     pub initalizer: TypedExpression,
     pub mutable: bool,
@@ -915,7 +952,7 @@ pub(crate) enum TypedExpressionKind {
     Binary(TypedBinaryExpressionNode),
     Unary(TypedUnaryExpressionNode),
     Literal(LiteralNode),
-    Ident(IdentLiteralNode),
+    Ident(IdentLiteralTuple),
     Call(TypedCallNode),
     Index(TypedIndexExpressionNode),
     FieldAccess(TypedFieldAccessNode),
@@ -953,4 +990,16 @@ pub(crate) struct TypedCallNode {
 #[derive(Debug)]
 pub(crate) struct TypedReturnNode {
     pub value: Option<TypedExpression>,
+}
+
+#[derive(Debug)]
+pub(crate) struct IdentLiteralIdNode {
+    pub value_id: usize,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct IdentLiteralTuple {
+    pub val: String,
+    pub id: usize,
 }
