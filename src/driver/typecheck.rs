@@ -281,6 +281,7 @@ impl<'a> TypeChecker<'a> {
 
         self.enter_scope();
 
+        let mut params_w_id = Vec::new();
         for param in &node.parameters {
             if let Some(reserved) = RESERVED.get(&param.0.value) {
                 self.diagnose.push_error(CompileError::symbol_redefinition(
@@ -291,11 +292,12 @@ impl<'a> TypeChecker<'a> {
                 ));
                 continue;
             }
+            let with_id = self.make_ident_id(&param.0);
             let symbol = Symbol {
                 span: param.0.span,
                 mutable: false,
                 typ: self.resolve_types(&param.1),
-                id: self.give_ident_id(),
+                id: with_id.value_id,
             };
             match self.scopes.last_mut().unwrap().entry(param.0.value.clone()) {
                 Entry::Occupied(occupied_entry) => {
@@ -310,6 +312,7 @@ impl<'a> TypeChecker<'a> {
                     entry.insert(symbol);
                 }
             };
+            params_w_id.push((with_id, param.1.clone()));
         }
 
         let typed_body = self.check_stmt_block(&node.body);
@@ -330,7 +333,7 @@ impl<'a> TypeChecker<'a> {
         TypedStatement {
             kind: TypedStatementKind::FunDefinition(TypedFunDefNode {
                 name: node.name.clone(),
-                parameters: node.parameters.clone(),
+                parameters: params_w_id,
                 ret_type: typ,
                 body: typed_body.into_block_node(),
             }),
@@ -517,7 +520,7 @@ impl<'a> TypeChecker<'a> {
 
         TypedStatement {
             kind: TypedStatementKind::Assignment(TypedAssignmentNode {
-                left: node.left.clone(),
+                left: self.make_ident_id(&node.left),
                 right: typed_right,
             }),
             span: node.span,
@@ -906,7 +909,7 @@ pub(crate) struct TypedBlockNode {
 #[derive(Debug)]
 pub(crate) struct TypedFunDefNode {
     pub name: IdentLiteralNode,
-    pub parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
+    pub parameters: Vec<(IdentLiteralIdNode, IdentLiteralNode)>,
     pub ret_type: Type,
     pub body: TypedBlockNode,
 }
@@ -936,7 +939,7 @@ pub(crate) struct TypedVarDecNode {
 }
 #[derive(Debug)]
 pub(crate) struct TypedAssignmentNode {
-    pub left: IdentLiteralNode,
+    pub left: IdentLiteralIdNode,
     pub right: TypedExpression,
 }
 

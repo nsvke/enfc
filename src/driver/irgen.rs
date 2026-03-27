@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use crate::driver::{
-    parse::{BinaryOperator, IdentLiteralNode, LiteralNode, LiteralValue, UnaryOperator},
+    parse::{BinaryOperator, LiteralNode, LiteralValue, UnaryOperator},
     typecheck::{
-        TypedAssignmentNode, TypedBinaryExpressionNode, TypedBlockNode, TypedCallNode,
-        TypedExpression, TypedExpressionKind, TypedFieldAccessNode, TypedFunDefNode, TypedIfNode,
-        TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
+        IdentLiteralTuple, TypedAssignmentNode, TypedBinaryExpressionNode, TypedBlockNode,
+        TypedCallNode, TypedExpression, TypedExpressionKind, TypedFieldAccessNode, TypedFunDefNode,
+        TypedIfNode, TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
         TypedUnaryExpressionNode, TypedVarDecNode, TypedWhileNode,
     },
 };
@@ -15,8 +17,9 @@ pub(crate) enum Instruction {
     PushChar(char),
     PushStrId(usize),
 
-    Load(String),
-    Store(String),
+    Load(usize),
+    Store(usize),
+    Init(usize),
 
     // Binary
     Add,
@@ -33,38 +36,46 @@ pub(crate) enum Instruction {
     Neg,
     Not,
 
-    BitAnd,
-    BitOr,
-    BitXor,
+    _BitAnd,
+    _BitOr,
+    _BitXor,
 
     Jump(usize),
     JumpIfFalse(usize),
 
     Call(usize, usize),
 
-    Return,
+    FunStart(usize),
+    FunParam(usize),
+    FunEnd,
+
+    Ret,
 }
 
 pub(crate) struct IrGenerator {
     instructions: Vec<Instruction>,
-    str_pool: Vec<String>,
-    fun_pool: Vec<String>,
+    str_pool: Pool,
+    fun_pool: Pool,
 }
 
 impl IrGenerator {
     pub fn new() -> Self {
         Self {
             instructions: Vec::new(),
-            str_pool: Vec::new(),
-            fun_pool: Vec::new(),
+            str_pool: Pool::new(),
+            fun_pool: Pool::new(),
         }
     }
 
-    pub fn generate_from(mut self, tasts: &[TypedStatement]) -> Vec<Instruction> {
+    pub fn generate_from(mut self, tasts: &[TypedStatement]) -> IrProgram {
         for tast in tasts {
             self.gen_from_stmt(tast);
         }
-        self.instructions
+        IrProgram {
+            instructions: self.instructions,
+            str_pool: self.str_pool,
+            fun_pool: self.fun_pool,
+        }
     }
 
     fn emit(&mut self, instruction: Instruction) {
@@ -76,14 +87,12 @@ impl IrGenerator {
         self.last_instr_index()
     }
 
-    fn add_str(&mut self, s: String) -> usize {
-        self.str_pool.push(s);
-        self.str_pool.len() - 1
+    fn get_str_id(&mut self, s: String) -> usize {
+        self.str_pool.get_id_or_append(s)
     }
 
-    fn add_fun(&mut self, s: String) -> usize {
-        self.fun_pool.push(s);
-        self.fun_pool.len() - 1
+    fn get_fun_id(&mut self, s: String) -> usize {
+        self.fun_pool.get_id_or_append(s)
     }
 
     fn current_index(&self) -> usize {
@@ -115,13 +124,76 @@ impl IrGenerator {
         }
     }
 
-    fn gen_from_stmt_if(&mut self, node: &TypedIfNode) {}
-    fn gen_from_stmt_while(&mut self, node: &TypedWhileNode) {}
-    fn gen_from_stmt_fun(&mut self, node: &TypedFunDefNode) {}
-    fn gen_from_stmt_block(&mut self, node: &TypedBlockNode) {}
-    fn gen_from_stmt_return(&mut self, node: &TypedReturnNode) {}
-    fn gen_from_stmt_assign(&mut self, node: &TypedAssignmentNode) {}
-    fn gen_from_stmt_val(&mut self, node: &TypedVarDecNode) {}
+    fn gen_from_stmt_fun(&mut self, node: &TypedFunDefNode) {
+        let fun_id = self.get_fun_id(node.name.value.clone());
+        self.emit(Instruction::FunStart(fun_id));
+
+        for param in &node.parameters {
+            self.emit(Instruction::FunParam(param.0.value_id));
+        }
+
+        self.gen_from_stmt_block(&node.body);
+        self.emit(Instruction::FunEnd);
+    }
+
+    fn gen_from_stmt_if(&mut self, node: &TypedIfNode) {
+        self.gen_from_expr(&node.condition);
+        let jmp_fls_instr_index = self.emit_with_index(Instruction::JumpIfFalse(0));
+        self.gen_from_stmt_block(&node.then_branch);
+        let jmp_instr_index = self.emit_with_index(Instruction::Jump(0));
+        self.add_jmp_index_here(jmp_fls_instr_index);
+
+        let mut jumpers = Vec::new();
+        for elsf in &node.else_if_branches {
+            self.gen_from_expr(&elsf.condition);
+            let jmp_fls_instr_index = self.emit_with_index(Instruction::JumpIfFalse(0));
+            self.gen_from_stmt_block(&elsf.then_branch);
+            jumpers.push(self.emit_with_index(Instruction::Jump(0)));
+            self.add_jmp_index_here(jmp_fls_instr_index);
+        }
+
+        if let Some(else_node) = &node.else_branch {
+            self.gen_from_stmt_block(else_node);
+        }
+        self.add_jmp_index_here(jmp_instr_index);
+        for jmp in jumpers {
+            self.add_jmp_index_here(jmp);
+        }
+    }
+
+    fn gen_from_stmt_while(&mut self, node: &TypedWhileNode) {
+        let start_index = self.current_index();
+        self.gen_from_expr(&node.condition);
+        let jmp_fls_instr_index = self.emit_with_index(Instruction::JumpIfFalse(0));
+        self.gen_from_stmt_block(&node.body);
+        self.emit(Instruction::Jump(start_index));
+        self.add_jmp_index_here(jmp_fls_instr_index);
+    }
+
+    fn gen_from_stmt_block(&mut self, node: &TypedBlockNode) {
+        for stmt in &node.body {
+            self.gen_from_stmt(stmt);
+        }
+    }
+
+    fn gen_from_stmt_return(&mut self, node: &TypedReturnNode) {
+        if let Some(expr) = &node.value {
+            self.gen_from_expr(expr);
+        }
+
+        self.emit(Instruction::Ret);
+    }
+
+    fn gen_from_stmt_assign(&mut self, node: &TypedAssignmentNode) {
+        self.gen_from_expr(&node.right);
+        self.emit(Instruction::Store(node.left.value_id));
+    }
+
+    fn gen_from_stmt_val(&mut self, node: &TypedVarDecNode) {
+        self.gen_from_expr(&node.initalizer);
+
+        self.emit(Instruction::Init(node.name_id.value_id));
+    }
 
     fn gen_from_stmt(&mut self, stmt: &TypedStatement) {
         match &stmt.kind {
@@ -153,12 +225,12 @@ impl IrGenerator {
         }
 
         let fun_name = if let TypedExpressionKind::Ident(node) = &node.primary.kind {
-            node.value.clone()
+            node.val.clone()
         } else {
             unimplemented!()
         };
 
-        let id = self.add_fun(fun_name);
+        let id = self.get_fun_id(fun_name);
         self.emit(Instruction::Call(id, node.arguments.len()));
     }
 
@@ -234,15 +306,15 @@ impl IrGenerator {
         }
     }
 
-    fn gen_from_expr_ident(&mut self, node: &IdentLiteralNode) {
-        self.emit(Instruction::Load(node.value.clone()));
+    fn gen_from_expr_ident(&mut self, node: &IdentLiteralTuple) {
+        self.emit(Instruction::Load(node.id));
     }
 
     fn gen_from_expr_literal(&mut self, node: &LiteralNode) {
         match &node.value {
             LiteralValue::Number(v) => self.emit(Instruction::PushInt(*v)),
             LiteralValue::Str(v) => {
-                let id = self.add_str(v.clone());
+                let id = self.get_str_id(v.clone());
                 self.emit(Instruction::PushStrId(id));
             }
             LiteralValue::Bool(v) => self.emit(Instruction::PushBool(*v)),
@@ -263,5 +335,62 @@ impl IrGenerator {
                 unreachable!("hey typechecker, what the hell is this doing here?")
             }
         }
+    }
+}
+
+pub(crate) struct Pool {
+    item_map: HashMap<String, usize>,
+    item_vec: Vec<String>,
+}
+
+impl Pool {
+    pub fn new() -> Self {
+        Self {
+            item_map: HashMap::new(),
+            item_vec: Vec::new(),
+        }
+    }
+
+    pub fn get_id_or_append(&mut self, s: String) -> usize {
+        if let Some(&id) = self.item_map.get(&s) {
+            return id;
+        }
+        let id = self.item_vec.len();
+        self.item_map.insert(s.clone(), id);
+        self.item_vec.push(s);
+        id
+    }
+
+    pub fn get_by_id(&self, id: usize) -> &str {
+        match self.item_vec.get(id) {
+            Some(s) => s,
+            None => unreachable!("pool: wrong id!"),
+        }
+    }
+
+    pub fn get_id(&self, s: &str) -> usize {
+        match self.item_map.get(s) {
+            Some(i) => *i,
+            None => unreachable!("pool: wrong str!"),
+        }
+    }
+}
+
+pub(crate) struct IrProgram {
+    instructions: Vec<Instruction>,
+    str_pool: Pool,
+    fun_pool: Pool,
+}
+impl IrProgram {
+    pub fn get_str(&self, id: usize) -> &str {
+        self.str_pool.get_by_id(id)
+    }
+
+    pub fn get_fun_name(&self, id: usize) -> &str {
+        self.fun_pool.get_by_id(id)
+    }
+
+    pub fn instructions(&self) -> &[Instruction] {
+        &self.instructions
     }
 }
