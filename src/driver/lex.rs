@@ -170,7 +170,7 @@ pub enum TokenKind {
 #[allow(unused)]
 #[derive(Clone, PartialEq, Eq)]
 pub enum LiteralKind {
-    Int(i64),
+    Int(i32),
     Char { val: char, terminated: bool },
     Str { val: String, terminated: bool },
     Bool(bool),
@@ -492,6 +492,10 @@ impl<'a> Lexer<'a> {
             token.clone()
         } else if is_digit(&self.buffer.chars) {
             TokenKind::Literal(LiteralKind::Int(self.buffer.chars.parse().unwrap()))
+        } else if self.buffer.chars == "true" {
+            TokenKind::Literal(LiteralKind::Bool(true))
+        } else if self.buffer.chars == "false" {
+            TokenKind::Literal(LiteralKind::Bool(false))
         } else if is_ident(&self.buffer.chars) {
             TokenKind::Ident(self.buffer.chars.clone())
         } else {
