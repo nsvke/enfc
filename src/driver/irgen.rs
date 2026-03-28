@@ -12,8 +12,8 @@ use crate::driver::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Instruction {
-    PushInt(i64),
+pub enum Instruction {
+    PushInt(i32),
     PushBool(bool),
     PushChar(char),
     PushStrId(usize),
@@ -37,10 +37,9 @@ pub(crate) enum Instruction {
     Neg,
     Not,
 
-    _BitAnd,
-    _BitOr,
-    _BitXor,
-
+    // _BitAnd, todo
+    // _BitOr, todo
+    // _BitXor, todo
     Jump(usize),
     JumpIfFalse(usize),
 
@@ -48,12 +47,17 @@ pub(crate) enum Instruction {
     ExternCall(usize, usize),
 
     ExternFunStart(usize, IrType),
+    ExternFunParam(usize, IrType),
     ExternFunEnd,
+
     FunStart(usize, IrType),
     FunParam(usize, IrType),
+    FunBodyStart,
     FunEnd,
 
-    Ret,
+    Discard,
+
+    Ret(bool),
 }
 
 pub(crate) struct IrGenerator {
@@ -128,23 +132,30 @@ impl IrGenerator {
         }
     }
 
+    fn gen_from_expr_stmt(&mut self, expr: &TypedExpression) {
+        self.gen_from_expr(expr);
+        self.emit(Instruction::Discard);
+    }
+
     fn gen_from_stmt_fun(&mut self, node: &TypedFunDefNode) {
         let fun_id = self.get_fun_id(node.name.value.clone());
 
         if !node.is_extern {
             self.emit(Instruction::FunStart(fun_id, (&node.ret_type).into()));
-        } else {
-            self.emit(Instruction::ExternFunStart(fun_id, (&node.ret_type).into()));
-        }
-
-        for param in &node.parameters {
-            self.emit(Instruction::FunParam(param.0.value_id, (&param.1).into()));
-        }
-
-        if !node.is_extern {
+            for param in &node.parameters {
+                self.emit(Instruction::FunParam(param.0.value_id, (&param.1).into()));
+            }
+            self.emit(Instruction::FunBodyStart);
             self.gen_from_stmt_block(&node.body);
             self.emit(Instruction::FunEnd);
         } else {
+            self.emit(Instruction::ExternFunStart(fun_id, (&node.ret_type).into()));
+            for param in &node.parameters {
+                self.emit(Instruction::ExternFunParam(
+                    param.0.value_id,
+                    (&param.1).into(),
+                ));
+            }
             self.emit(Instruction::ExternFunEnd);
         }
     }
@@ -190,11 +201,13 @@ impl IrGenerator {
     }
 
     fn gen_from_stmt_return(&mut self, node: &TypedReturnNode) {
+        let mut has_value = false;
         if let Some(expr) = &node.value {
             self.gen_from_expr(expr);
+            has_value = true;
         }
 
-        self.emit(Instruction::Ret);
+        self.emit(Instruction::Ret(has_value));
     }
 
     fn gen_from_stmt_assign(&mut self, node: &TypedAssignmentNode) {
@@ -220,6 +233,7 @@ impl IrGenerator {
             TypedStatementKind::FunDefinition(node) => self.gen_from_stmt_fun(node),
             TypedStatementKind::Block(node) => self.gen_from_stmt_block(node),
             TypedStatementKind::Expression(expr) => self.gen_from_expr(expr),
+            TypedStatementKind::ExpressionStatement(expr) => self.gen_from_expr_stmt(expr),
             TypedStatementKind::Return(node) => self.gen_from_stmt_return(node),
             TypedStatementKind::Broken => {
                 unreachable!("hey typechecker, what the hell is this doing here?")
@@ -389,6 +403,7 @@ impl Pool {
         }
     }
 
+    #[allow(unused)]
     pub fn get_id(&self, s: &str) -> usize {
         match self.item_map.get(s) {
             Some(i) => *i,
@@ -397,7 +412,7 @@ impl Pool {
     }
 }
 
-pub(crate) struct IrProgram {
+pub struct IrProgram {
     instructions: Vec<Instruction>,
     str_pool: Pool,
     fun_pool: Pool,
@@ -417,8 +432,8 @@ impl IrProgram {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IrType {
-    I64,
+pub enum IrType {
+    I32,
     Bool,
     Char,
     Str,
@@ -428,7 +443,7 @@ pub(crate) enum IrType {
 impl From<&Type> for IrType {
     fn from(value: &Type) -> Self {
         match &value.kind {
-            TypeKind::Int => Self::I64,
+            TypeKind::Int => Self::I32,
             TypeKind::Bool => Self::Bool,
             TypeKind::Char => Self::Char,
             TypeKind::Str => Self::Str,

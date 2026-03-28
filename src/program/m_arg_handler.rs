@@ -28,7 +28,7 @@ impl Args {
         Ok(Config {
             source_code: source_as_string(&path)?,
             source_path: path,
-            output_path: self.get_arg("output").unwrap_or(String::from("./")),
+            output_path: self.get_arg("output").unwrap_or(String::from("./output")), // TODO use source file name as output name for default
         })
     }
 }

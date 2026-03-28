@@ -102,6 +102,9 @@ pub mod fmt_miette_impl {
                 CompileError::Semantic(SemanticError::NotFoundMain { .. }) => {
                     "consider adding a `main` function".into()
                 }
+                CompileError::Semantic(SemanticError::WrongMain { .. }) => {
+                    "wrong main sign here".into()
+                }
                 _ => "error here".into(),
             };
 
@@ -186,8 +189,11 @@ pub mod fmt_miette_impl {
                         ));
                     }
                 }
-                CompileError::Semantic(SemanticError::UnknownType { val, span }) => {
+                CompileError::Semantic(SemanticError::UnknownType { val, .. }) => {
                     return Some(Box::new("use int, chr, str, bool or nret"));
+                }
+                CompileError::Semantic(SemanticError::WrongMain { .. }) => {
+                    return Some(Box::new("try fun main() nret {.."));
                 }
                 _ => {}
             }
@@ -292,6 +298,9 @@ pub mod fmt_miette_impl {
                 }
                 CompileError::Semantic(SemanticError::NotFoundMain { .. }) => {
                     write!(f, "`main` function not found")
+                }
+                CompileError::Semantic(SemanticError::WrongMain { .. }) => {
+                    write!(f, "'main' function is not correct")
                 }
             }
         }

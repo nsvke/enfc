@@ -3,7 +3,7 @@ use crate::config::Config;
 use crate::formatter::Formatter;
 
 pub struct Diagnostics {
-    config: Config,
+    pub config: Config,
     errors: Vec<CompileError>,
     formatter: Formatter,
 }

@@ -75,6 +75,9 @@ pub enum SemanticError {
     NotFoundMain {
         span: Span,
     },
+    WrongMain {
+        span: Span,
+    },
 }
 #[derive(Debug)]
 pub enum SymbolKind {
@@ -196,6 +199,9 @@ impl CompileError {
     pub fn not_found_main(span: Span) -> Self {
         CompileError::Semantic(SemanticError::NotFoundMain { span })
     }
+    pub fn wrong_main(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::WrongMain { span })
+    }
 }
 
 pub trait ErrorFormatter {
@@ -225,6 +231,7 @@ impl CompileError {
             Self::Semantic(SemanticError::NestedFunction { span }) => *span,
             Self::Semantic(SemanticError::MissingReturn { span }) => *span,
             Self::Semantic(SemanticError::NotFoundMain { span }) => *span,
+            Self::Semantic(SemanticError::WrongMain { span }) => *span,
         }
     }
 }

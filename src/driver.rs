@@ -1,3 +1,4 @@
+mod codegen;
 mod irgen;
 mod lex;
 mod parse;
@@ -6,25 +7,40 @@ mod typecheck;
 use crate::{
     config::Config,
     diagnostic::Diagnostics,
-    driver::{irgen::IrGenerator, lex::Lexer, parse::Parser, typecheck::TypeChecker},
+    driver::{
+        codegen::{CodeGen, CompileOutput},
+        irgen::IrGenerator,
+        lex::Lexer,
+        parse::{Parser, Statement},
+        typecheck::{TypeChecker, TypedStatement},
+    },
 };
 
+pub use CompileOutput::{Binary, SourceCode};
+pub use irgen::IrProgram;
 pub use lex::{Token, TokenKind};
 pub use typecheck::TypeKind;
 
 pub struct Driver {
-    diagnose: Diagnostics,
+    packet: Packet,
 }
 
 impl Driver {
     pub fn new(config: Config) -> Self {
         Self {
-            diagnose: Diagnostics::new(config),
+            packet: Packet::new(Diagnostics::new(config)),
         }
     }
 
+    fn diagnose(&self) -> &Diagnostics {
+        &self.packet.diagnostics
+    }
+    fn diagnose_mut(&mut self) -> &mut Diagnostics {
+        &mut self.packet.diagnostics
+    }
+
     pub fn run(&mut self) {
-        let lexer = Lexer::new(self.diagnose.source_code().char_indices().peekable());
+        let lexer = Lexer::new(self.diagnose().source_code().char_indices().peekable());
         let tokens = lexer.tokenize();
         println!("------------------------------------------------------------------------------");
         println!("Token List");
@@ -35,8 +51,11 @@ impl Driver {
                 "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
             );
         });
+        if tokens.len() == 0 {
+            return;
+        }
 
-        let parser = Parser::new(&tokens, &mut self.diagnose);
+        let parser = Parser::new(&tokens, self.diagnose_mut());
         let statements = parser.parse();
         println!("------------------------------------------------------------------------------");
         println!("Statement List");
@@ -47,8 +66,9 @@ impl Driver {
                 "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
             );
         });
+        self.packet.load_tokens(tokens);
 
-        let typechecker = TypeChecker::new(&mut self.diagnose);
+        let typechecker = TypeChecker::new(self.diagnose_mut());
         let typed_statements = typechecker.check(&statements);
         println!("------------------------------------------------------------------------------");
         println!("TypedStatement List");
@@ -59,9 +79,10 @@ impl Driver {
                 "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
             );
         });
+        self.packet.load_asts(statements);
 
         //println!("------------------------------------------------------------------------------");
-        if self.diagnose.has_errors() {
+        if self.diagnose().has_errors() {
             println!(
                 "\x1b[31m------------------------------------------------------------------------------"
             );
@@ -69,12 +90,8 @@ impl Driver {
             println!(
                 "------------------------------------------------------------------------------\x1b[0m"
             );
-            self.diagnose.print_errors();
-            println!("{} errors occured.", self.diagnose.errors_len());
-            return;
-        }
-
-        if typed_statements.len() == 0 {
+            self.diagnose().print_errors();
+            println!("{} errors occured.", self.diagnose().errors_len());
             return;
         }
 
@@ -83,12 +100,65 @@ impl Driver {
         println!("------------------------------------------------------------------------------");
         println!("IR List");
         println!("------------------------------------------------------------------------------");
-        ir.instructions().iter().for_each(|t| {
-            println!("{:?}", *t);
+        ir.instructions().iter().enumerate().for_each(|(i,t)| {
+            println!("{}: {:?}", i,*t);
             println!(
                 "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
             );
         });
+        self.packet.load_tasts(typed_statements);
+
+        let output = CodeGen::compile(&ir);
+        println!("------------------------------------------------------------------------------");
+        println!("C Code");
+        println!("------------------------------------------------------------------------------");
+        if let CompileOutput::SourceCode(c_code) = &output {
+            println!("{}", c_code);
+        }
+
+        self.packet.load_ir(ir);
+        self.packet.load_output(output.into());
+    }
+
+    pub fn result(self) -> Packet {
+        self.packet
+    }
+}
+
+pub struct Packet {
+    tokens: Option<Vec<Token>>,
+    asts: Option<Vec<Statement>>,
+    tasts: Option<Vec<TypedStatement>>,
+    ir: Option<IrProgram>,
+    pub output: Option<CompileOutput>,
+    pub diagnostics: Diagnostics,
+}
+
+impl Packet {
+    pub fn new(diagnostics: Diagnostics) -> Self {
+        Self {
+            tokens: None,
+            asts: None,
+            tasts: None,
+            ir: None,
+            output: None,
+            diagnostics,
+        }
+    }
+    fn load_tokens(&mut self, tokens: Vec<Token>) {
+        self.tokens = Some(tokens)
+    }
+    fn load_asts(&mut self, asts: Vec<Statement>) {
+        self.asts = Some(asts)
+    }
+    fn load_tasts(&mut self, tasts: Vec<TypedStatement>) {
+        self.tasts = Some(tasts)
+    }
+    fn load_ir(&mut self, ir: IrProgram) {
+        self.ir = Some(ir)
+    }
+    fn load_output(&mut self, output: CompileOutput) {
+        self.output = Some(output)
     }
 }
 
