@@ -77,8 +77,6 @@ impl<'a> Parser<'a> {
         statements
     }
 
-    //TODO add parse_expression_statement()
-
     fn parse_statement(&mut self) -> Option<Statement> {
         match self.peek().kind {
             Val | Var => Some(self.parse_val()),
@@ -90,7 +88,7 @@ impl<'a> Parser<'a> {
             Ret => Some(self.parse_ret()),
             Ident(_) if self.peek_at(1).kind == Eq => Some(self.parse_asgn()),
             Ident(_) | Literal(_) | OpenParam | Bang | Minus => {
-                Some(Statement::Expression(self.parse_expr_stmt()))
+                Some(Statement::ExpressionStatement(self.parse_expr_stmt()))
             }
             Semi | Eof => {
                 self.consume_quietly();
@@ -951,15 +949,16 @@ impl<'a> Parser<'a> {
 }
 
 pub(crate) enum Statement {
-    VarDeclaration(VarDecNode), // +
-    Assignment(AssignmentNode), // +
+    VarDeclaration(VarDecNode),
+    Assignment(AssignmentNode),
     If(IfNode),
-    While(WhileNode), // +
+    While(WhileNode),
     FunDefinition(FunDefNode),
-    Block(BlockNode),       // +
-    Expression(Expression), // +
-    Return(ReturnNode),     // +
-    Broken(Span),           // +
+    Block(BlockNode),
+    Expression(Expression),
+    ExpressionStatement(Expression),
+    Return(ReturnNode),
+    Broken(Span),
 }
 
 impl From<Span> for Statement {
@@ -978,6 +977,7 @@ impl fmt::Debug for Statement {
             Self::FunDefinition(n) => n.fmt(f),
             Self::Block(n) => n.fmt(f),
             Self::Expression(n) => n.fmt(f),
+            Self::ExpressionStatement(n) => n.fmt(f),
             Self::Return(n) => n.fmt(f),
             Self::Broken(span) => write!(
                 f,
@@ -1393,7 +1393,7 @@ impl fmt::Debug for LiteralNode {
 
 #[derive(Debug, Clone)]
 pub(crate) enum LiteralValue {
-    Number(i64),
+    Number(i32),
     Str(String),
     Bool(bool),
     Char(char),

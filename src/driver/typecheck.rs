@@ -79,7 +79,7 @@ pub(crate) struct TypeChecker<'a> {
     // destruct: bool,
     expected_return: Option<(TypeKind, Span)>,
     next_ident_id: usize,
-    found_main: bool,
+    main_loc: Option<Span>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -89,41 +89,13 @@ impl<'a> TypeChecker<'a> {
             diagnose,
             expected_return: None,
             next_ident_id: 1,
-            found_main: false,
+            main_loc: None,
         };
-        new_type_checker.init();
+        // new_type_checker.init();
         new_type_checker
     }
 
-    fn init(&mut self) {
-        // TODO add init list <name, Symbol> and init them with for
-        let id1 = self.give_ident_id();
-        self.scopes[0].insert(
-            "true".into(),
-            Symbol {
-                typ: Type {
-                    span: Span::default(),
-                    kind: TypeKind::Bool,
-                },
-                span: Span::default(),
-                mutable: false,
-                id: id1,
-            },
-        );
-        let id2 = self.give_ident_id();
-        self.scopes[0].insert(
-            "false".into(),
-            Symbol {
-                typ: Type {
-                    span: Span::default(),
-                    kind: TypeKind::Bool,
-                },
-                span: Span::default(),
-                mutable: false,
-                id: id2,
-            },
-        );
-    }
+    // fn init(&mut self) {}
 
     pub(crate) fn check(mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
         self.check_and_collect(statements)
@@ -132,6 +104,7 @@ impl<'a> TypeChecker<'a> {
     fn check_and_collect(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
         let mut typed_statements = Vec::new();
         self.collect_signatures(statements);
+        self.check_main_sign();
         for stmt in statements {
             typed_statements.push(self.check_stmt(stmt));
         }
@@ -143,7 +116,7 @@ impl<'a> TypeChecker<'a> {
             None => Span::default(),
         };
 
-        if !self.found_main {
+        if let None = self.main_loc {
             self.diagnose
                 .push_error(CompileError::not_found_main(eof_span));
         }
@@ -198,7 +171,12 @@ impl<'a> TypeChecker<'a> {
             let id = self.give_ident_id();
             match stmt {
                 Statement::FunDefinition(node) => {
-                    self.check_main(&node.name.value);
+                    if node.name.value == "main" {
+                        self.main_loc = Some(Span {
+                            start: node.name.span.start,
+                            end: node.ret_type.span.end,
+                        });
+                    }
                     let is_extern = node.is_extern;
                     // TODO check redefinition first, resolve types later
                     let params = node
@@ -238,9 +216,24 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_main(&mut self, name: &str) {
-        if name == "main" {
-            self.found_main = true;
+    fn check_main_sign(&mut self) {
+        if let Some(loc) = self.main_loc {
+            for func in &self.scopes[0] {
+                if func.0 == "main" {
+                    match &func.1.typ.kind {
+                        TypeKind::Function {
+                            params,
+                            ret,
+                            is_extern,
+                        } => {
+                            if params.len() != 0 || ret.kind != TypeKind::Nret || *is_extern {
+                                self.diagnose.push_error(CompileError::wrong_main(loc));
+                            }
+                        }
+                        _ => unreachable!("only functions"),
+                    }
+                }
+            }
         }
     }
 
@@ -525,7 +518,9 @@ impl<'a> TypeChecker<'a> {
         let symbol = self.resolve_symbol(&node.left.value);
         let typed_right = self.check_expr(&node.right);
 
+        let mut id = 0;
         if let Some(sym) = symbol {
+            id = sym.id;
             if sym.mutable == false {
                 self.diagnose.push_error(CompileError::not_mutable(
                     node.left.value.clone(),
@@ -554,7 +549,10 @@ impl<'a> TypeChecker<'a> {
 
         TypedStatement {
             kind: TypedStatementKind::Assignment(TypedAssignmentNode {
-                left: self.make_ident_id(&node.left),
+                left: IdentLiteralIdNode {
+                    value_id: id,
+                    span: node.left.span,
+                },
                 right: typed_right,
             }),
             span: node.span,
@@ -574,6 +572,7 @@ impl<'a> TypeChecker<'a> {
             .get(&node.name.value)
             .map(|sym| sym.span);
 
+        let mut id = 0;
         if let Some(reserved) = RESERVED.get(&node.name.value) {
             self.diagnose.push_error(CompileError::symbol_redefinition(
                 node.name.value.clone(),
@@ -622,7 +621,7 @@ impl<'a> TypeChecker<'a> {
                 }
             }
 
-            let id = self.give_ident_id();
+            id = self.give_ident_id();
             self.scopes.last_mut().unwrap().insert(
                 node.name.value.clone(),
                 Symbol {
@@ -633,10 +632,12 @@ impl<'a> TypeChecker<'a> {
                 },
             );
         }
-
         TypedStatement {
             kind: TypedStatementKind::VarDeclaration(TypedVarDecNode {
-                name_id: self.make_ident_id(&node.name),
+                name_id: IdentLiteralIdNode {
+                    value_id: id,
+                    span: node.span,
+                },
                 var_type: typ,
                 initalizer: typed_initalizer,
                 mutable: node.mutable,
@@ -659,6 +660,14 @@ impl<'a> TypeChecker<'a> {
                 TypedStatement {
                     span: typed_expr.span,
                     kind: TypedStatementKind::Expression(typed_expr),
+                    terminates: false,
+                }
+            }
+            Statement::ExpressionStatement(expr) => {
+                let typed_expr = self.check_expr(expr);
+                TypedStatement {
+                    span: typed_expr.span,
+                    kind: TypedStatementKind::ExpressionStatement(typed_expr),
                     terminates: false,
                 }
             }
@@ -939,6 +948,7 @@ pub(crate) enum TypedStatementKind {
     FunDefinition(TypedFunDefNode),
     Block(TypedBlockNode),
     Expression(TypedExpression),
+    ExpressionStatement(TypedExpression),
     Return(TypedReturnNode),
     Broken,
 }
