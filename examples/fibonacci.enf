@@ -1,0 +1,25 @@
+extern fun putchar(i int) int;
+
+fun fibonacci(n int) int {
+    if n < 2 {
+        ret n;
+    }
+
+    ret fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+fun print_num(n int) nret {
+    if n > 9 {
+        print_num(n / 10);
+    }
+    val remainder = n % 10;
+    putchar(remainder + 48);
+}
+
+fun main() nret {
+    val f = fibonacci(10);
+
+    print_num(f);
+
+    putchar(10); -- newline
+}

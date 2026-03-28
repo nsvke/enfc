@@ -1,0 +1,5 @@
+extern fun puts(text str) int;
+
+fun main() nret {
+    puts("Hello World!");
+}
