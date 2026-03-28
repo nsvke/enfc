@@ -99,6 +99,9 @@ pub mod fmt_miette_impl {
                 CompileError::Semantic(SemanticError::MissingReturn { .. }) => {
                     "missing return here".into()
                 }
+                CompileError::Semantic(SemanticError::NotFoundMain { .. }) => {
+                    "consider adding a `main` function".into()
+                }
                 _ => "error here".into(),
             };
 
@@ -286,6 +289,9 @@ pub mod fmt_miette_impl {
                         f,
                         "implicitly returns `nret` as its body has no `ret` expression"
                     )
+                }
+                CompileError::Semantic(SemanticError::NotFoundMain { .. }) => {
+                    write!(f, "`main` function not found")
                 }
             }
         }

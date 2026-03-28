@@ -42,7 +42,11 @@ pub enum TypeKind {
     Char,
     Nret,
     // Error,
-    Function { params: Vec<Type>, ret: Box<Type> },
+    Function {
+        params: Vec<Type>,
+        ret: Box<Type>,
+        is_extern: bool,
+    },
     Unknown,
 }
 
@@ -54,7 +58,7 @@ impl std::fmt::Display for TypeKind {
             Self::Bool => write!(f, "bool"),
             Self::Char => write!(f, "chr"),
             Self::Nret => write!(f, "nret"),
-            Self::Function { params, ret } => write!(f, "function"),
+            Self::Function { .. } => write!(f, "function"),
             Self::Unknown => write!(f, "unknown"),
         }
     }
@@ -75,6 +79,7 @@ pub(crate) struct TypeChecker<'a> {
     // destruct: bool,
     expected_return: Option<(TypeKind, Span)>,
     next_ident_id: usize,
+    found_main: bool,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -84,6 +89,7 @@ impl<'a> TypeChecker<'a> {
             diagnose,
             expected_return: None,
             next_ident_id: 1,
+            found_main: false,
         };
         new_type_checker.init();
         new_type_checker
@@ -128,6 +134,18 @@ impl<'a> TypeChecker<'a> {
         self.collect_signatures(statements);
         for stmt in statements {
             typed_statements.push(self.check_stmt(stmt));
+        }
+        let eof_span = match typed_statements.last() {
+            Some(stmt) => Span {
+                start: stmt.span.end,
+                end: stmt.span.end,
+            },
+            None => Span::default(),
+        };
+
+        if !self.found_main {
+            self.diagnose
+                .push_error(CompileError::not_found_main(eof_span));
         }
         typed_statements
     }
@@ -180,6 +198,8 @@ impl<'a> TypeChecker<'a> {
             let id = self.give_ident_id();
             match stmt {
                 Statement::FunDefinition(node) => {
+                    self.check_main(&node.name.value);
+                    let is_extern = node.is_extern;
                     // TODO check redefinition first, resolve types later
                     let params = node
                         .parameters
@@ -203,6 +223,7 @@ impl<'a> TypeChecker<'a> {
                                     kind: TypeKind::Function {
                                         params,
                                         ret: Box::new(ret_typ),
+                                        is_extern,
                                     },
                                 },
                                 span: node.span,
@@ -214,6 +235,12 @@ impl<'a> TypeChecker<'a> {
                 }
                 _ => {}
             };
+        }
+    }
+
+    fn check_main(&mut self, name: &str) {
+        if name == "main" {
+            self.found_main = true;
         }
     }
 
@@ -312,19 +339,25 @@ impl<'a> TypeChecker<'a> {
                     entry.insert(symbol);
                 }
             };
-            params_w_id.push((with_id, param.1.clone()));
+            params_w_id.push((with_id, self.resolve_types(&param.1)));
         }
-
-        let typed_body = self.check_stmt_block(&node.body);
-
-        if typ.kind != TypeKind::Nret && typ.kind != TypeKind::Unknown && !typed_body.terminates {
-            self.diagnose.push_error(CompileError::missing_return(Span {
-                // fun main () nret {
-                //     ^^^^^^^^^^^^
-                start: node.name.span.start,
-                end: node.ret_type.span.end,
-            }));
-        }
+        let typed_body = if !node.is_extern {
+            let typed_body_stmt = self.check_stmt_block(&node.body);
+            if typ.kind != TypeKind::Nret
+                && typ.kind != TypeKind::Unknown
+                && !typed_body_stmt.terminates
+            {
+                self.diagnose.push_error(CompileError::missing_return(Span {
+                    // fun main () nret {
+                    //     ^^^^^^^^^^^^
+                    start: node.name.span.start,
+                    end: node.ret_type.span.end,
+                }));
+            }
+            typed_body_stmt.into_block_node()
+        } else {
+            TypedBlockNode { body: Vec::new() }
+        };
 
         self.exit_scope();
 
@@ -335,7 +368,8 @@ impl<'a> TypeChecker<'a> {
                 name: node.name.clone(),
                 parameters: params_w_id,
                 ret_type: typ,
-                body: typed_body.into_block_node(),
+                body: typed_body,
+                is_extern: node.is_extern,
             }),
             span: node.span,
             terminates: false,
@@ -672,9 +706,16 @@ impl<'a> TypeChecker<'a> {
 
         let mut arguments = Vec::new();
 
+        let mut is_extern_1 = false;
         if typed_primary.typ != TypeKind::Unknown {
             match &typed_primary.typ {
-                TypeKind::Function { params, ret } => {
+                TypeKind::Function {
+                    params,
+                    ret,
+                    is_extern,
+                } => {
+                    is_extern_1 = *is_extern;
+
                     if node.arguments.len() != params.len() {
                         self.diagnose.push_error(CompileError::missing_argument(
                             params.len(),
@@ -714,6 +755,7 @@ impl<'a> TypeChecker<'a> {
             kind: TypedExpressionKind::Call(TypedCallNode {
                 primary: Box::new(typed_primary),
                 arguments,
+                is_extern: is_extern_1,
             }),
             typ,
             span: node.span,
@@ -909,9 +951,10 @@ pub(crate) struct TypedBlockNode {
 #[derive(Debug)]
 pub(crate) struct TypedFunDefNode {
     pub name: IdentLiteralNode,
-    pub parameters: Vec<(IdentLiteralIdNode, IdentLiteralNode)>,
+    pub parameters: Vec<(IdentLiteralIdNode, Type)>,
     pub ret_type: Type,
     pub body: TypedBlockNode,
+    pub is_extern: bool,
 }
 #[derive(Debug)]
 pub(crate) struct TypedIfNode {
@@ -988,6 +1031,7 @@ pub(crate) struct TypedUnaryExpressionNode {
 pub(crate) struct TypedCallNode {
     pub primary: Box<TypedExpression>,
     pub arguments: Vec<TypedExpression>,
+    pub is_extern: bool,
 }
 
 #[derive(Debug)]

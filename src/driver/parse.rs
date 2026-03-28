@@ -83,6 +83,7 @@ impl<'a> Parser<'a> {
         match self.peek().kind {
             Val | Var => Some(self.parse_val()),
             Fun => Some(self.parse_fun()),
+            Extern => Some(self.parse_extern_fun()),
             If => Some(self.parse_if()),
             While => Some(self.parse_while()),
             OpenBrace => Some(self.parse_block()),
@@ -202,6 +203,147 @@ impl<'a> Parser<'a> {
                 start: ret_token.span.start,
                 end: semi_token.span.end,
             },
+        })
+    }
+
+    // extern fun ident( i int, i2 int );
+    fn parse_extern_fun(&mut self) -> Statement {
+        let extern_token = self.consume();
+        let fun_token = match self.consume() {
+            t if matches!(t.kind, Fun) => t,
+            found => {
+                let err = CompileError::unexpected_token(
+                    Ident("".to_string()),
+                    found.kind.clone(),
+                    found.span,
+                );
+                self.diagnose.push_error(err);
+                return self.sync();
+            }
+        };
+
+        let name_token = match self.consume() {
+            t if matches!(t.kind, Ident(_)) => t,
+            found => {
+                let err = CompileError::unexpected_token(
+                    Ident("".to_string()),
+                    found.kind.clone(),
+                    found.span,
+                );
+                self.diagnose.push_error(err);
+                return self.sync();
+            }
+        };
+        let name_str = if let Ident(s) = &name_token.kind {
+            s.clone()
+        } else {
+            String::new()
+        };
+        let name_node = IdentLiteralNode {
+            value: name_str,
+            span: name_token.span,
+        };
+
+        if let Err(broken) = self.expect(OpenParam) {
+            return broken.into();
+        }
+
+        let mut parameters = Vec::new();
+        while !matches!(self.peek().kind, CloseParam | Eof) {
+            let p_name_token = match self.consume() {
+                t if matches!(t.kind, Ident(_)) => t,
+                found => {
+                    let err = CompileError::unexpected_token(
+                        Ident("param_name".to_string()),
+                        found.kind.clone(),
+                        found.span,
+                    );
+                    self.diagnose.push_error(err);
+                    return self.sync();
+                }
+            };
+            let p_name_str = if let Ident(s) = &p_name_token.kind {
+                s.clone()
+            } else {
+                String::new()
+            };
+            let p_name_node = IdentLiteralNode {
+                value: p_name_str,
+                span: p_name_token.span,
+            };
+
+            let p_type_token = match self.consume() {
+                t if matches!(t.kind, Ident(_)) => t,
+                found => {
+                    let err = CompileError::unexpected_token(
+                        Ident("param_type".to_string()),
+                        found.kind.clone(),
+                        found.span,
+                    );
+                    self.diagnose.push_error(err);
+                    return self.sync();
+                }
+            };
+            let p_type_str = if let Ident(s) = &p_type_token.kind {
+                s.clone()
+            } else {
+                String::new()
+            };
+            let p_type_node = IdentLiteralNode {
+                value: p_type_str,
+                span: p_type_token.span,
+            };
+
+            parameters.push((p_name_node, p_type_node));
+
+            if matches!(self.peek().kind, Comma) {
+                self.consume_quietly();
+            }
+        }
+
+        if let Err(broken) = self.expect(CloseParam) {
+            return broken.into();
+        }
+
+        let type_token = if let Ident(_) = self.peek().kind {
+            self.consume()
+        } else {
+            let found = self.peek();
+            let err = CompileError::unexpected_token(
+                Ident("ret_type".to_string()),
+                found.kind.clone(),
+                found.span,
+            );
+            self.diagnose.push_error(err);
+            return self.sync();
+        };
+        let type_str = if let Ident(s) = &type_token.kind {
+            s.clone()
+        } else {
+            String::new()
+        };
+        let type_node = IdentLiteralNode {
+            value: type_str,
+            span: type_token.span,
+        };
+
+        if let Err(broken) = self.expect(Semi) {
+            return broken.into();
+        }
+
+        Statement::FunDefinition(FunDefNode {
+            name: name_node,
+            parameters,
+            span: Span {
+                start: fun_token.span.start,
+                end: type_node.span.end,
+            },
+            body: BlockNode {
+                body: Vec::new(),
+                span: Span::default(),
+            },
+            ret_type: type_node,
+            is_extern: true,
         })
     }
 
@@ -333,6 +475,7 @@ impl<'a> Parser<'a> {
             },
             body: body_node,
             ret_type: type_node,
+            is_extern: false,
         })
     }
 
@@ -865,6 +1008,7 @@ pub(crate) struct FunDefNode {
     pub parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
     pub ret_type: IdentLiteralNode,
     pub body: BlockNode,
+    pub is_extern: bool,
     pub span: Span,
 }
 impl fmt::Debug for FunDefNode {
@@ -1249,7 +1393,7 @@ impl fmt::Debug for LiteralNode {
 
 #[derive(Debug, Clone)]
 pub(crate) enum LiteralValue {
-    Number(i32),
+    Number(i64),
     Str(String),
     Bool(bool),
     Char(char),

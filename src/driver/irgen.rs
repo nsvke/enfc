@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::driver::{
+    TypeKind,
     parse::{BinaryOperator, LiteralNode, LiteralValue, UnaryOperator},
     typecheck::{
-        IdentLiteralTuple, TypedAssignmentNode, TypedBinaryExpressionNode, TypedBlockNode,
+        IdentLiteralTuple, Type, TypedAssignmentNode, TypedBinaryExpressionNode, TypedBlockNode,
         TypedCallNode, TypedExpression, TypedExpressionKind, TypedFieldAccessNode, TypedFunDefNode,
         TypedIfNode, TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
         TypedUnaryExpressionNode, TypedVarDecNode, TypedWhileNode,
@@ -12,14 +13,14 @@ use crate::driver::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Instruction {
-    PushInt(i32),
+    PushInt(i64),
     PushBool(bool),
     PushChar(char),
     PushStrId(usize),
 
     Load(usize),
     Store(usize),
-    Init(usize),
+    Init(usize, IrType),
 
     // Binary
     Add,
@@ -44,9 +45,12 @@ pub(crate) enum Instruction {
     JumpIfFalse(usize),
 
     Call(usize, usize),
+    ExternCall(usize, usize),
 
-    FunStart(usize),
-    FunParam(usize),
+    ExternFunStart(usize, IrType),
+    ExternFunEnd,
+    FunStart(usize, IrType),
+    FunParam(usize, IrType),
     FunEnd,
 
     Ret,
@@ -126,14 +130,23 @@ impl IrGenerator {
 
     fn gen_from_stmt_fun(&mut self, node: &TypedFunDefNode) {
         let fun_id = self.get_fun_id(node.name.value.clone());
-        self.emit(Instruction::FunStart(fun_id));
 
-        for param in &node.parameters {
-            self.emit(Instruction::FunParam(param.0.value_id));
+        if !node.is_extern {
+            self.emit(Instruction::FunStart(fun_id, (&node.ret_type).into()));
+        } else {
+            self.emit(Instruction::ExternFunStart(fun_id, (&node.ret_type).into()));
         }
 
-        self.gen_from_stmt_block(&node.body);
-        self.emit(Instruction::FunEnd);
+        for param in &node.parameters {
+            self.emit(Instruction::FunParam(param.0.value_id, (&param.1).into()));
+        }
+
+        if !node.is_extern {
+            self.gen_from_stmt_block(&node.body);
+            self.emit(Instruction::FunEnd);
+        } else {
+            self.emit(Instruction::ExternFunEnd);
+        }
     }
 
     fn gen_from_stmt_if(&mut self, node: &TypedIfNode) {
@@ -192,7 +205,10 @@ impl IrGenerator {
     fn gen_from_stmt_val(&mut self, node: &TypedVarDecNode) {
         self.gen_from_expr(&node.initalizer);
 
-        self.emit(Instruction::Init(node.name_id.value_id));
+        self.emit(Instruction::Init(
+            node.name_id.value_id,
+            (&node.var_type).into(),
+        ));
     }
 
     fn gen_from_stmt(&mut self, stmt: &TypedStatement) {
@@ -231,7 +247,12 @@ impl IrGenerator {
         };
 
         let id = self.get_fun_id(fun_name);
-        self.emit(Instruction::Call(id, node.arguments.len()));
+
+        if !node.is_extern {
+            self.emit(Instruction::Call(id, node.arguments.len()));
+        } else {
+            self.emit(Instruction::ExternCall(id, node.arguments.len()));
+        }
     }
 
     fn gen_from_expr_unary(&mut self, node: &TypedUnaryExpressionNode) {
@@ -392,5 +413,28 @@ impl IrProgram {
 
     pub fn instructions(&self) -> &[Instruction] {
         &self.instructions
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IrType {
+    I64,
+    Bool,
+    Char,
+    Str,
+    Void,
+}
+
+impl From<&Type> for IrType {
+    fn from(value: &Type) -> Self {
+        match &value.kind {
+            TypeKind::Int => Self::I64,
+            TypeKind::Bool => Self::Bool,
+            TypeKind::Char => Self::Char,
+            TypeKind::Str => Self::Str,
+            TypeKind::Function { ret, .. } => Self::from(ret.as_ref()),
+            TypeKind::Nret => Self::Void,
+            TypeKind::Unknown => unreachable!("unknown type is imposible here"),
+        }
     }
 }

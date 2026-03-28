@@ -22,6 +22,7 @@ static KEYWORDS: Map<&'static str, TokenKind> = phf_map! {
     "imp" => TokenKind::Impl,
     "nll" => TokenKind::Null,
     "any" => TokenKind::Any,
+    "extern" => TokenKind::Extern,
 };
 static SYMBOLS: Map<&'static str, TokenKind> = phf_map! {
     "--" => TokenKind::LineComment,
@@ -148,6 +149,7 @@ pub enum TokenKind {
     Var,
     Const,
     Fun,
+    Extern,
     If,
     ElseIf,
     Else,
@@ -168,7 +170,7 @@ pub enum TokenKind {
 #[allow(unused)]
 #[derive(Clone, PartialEq, Eq)]
 pub enum LiteralKind {
-    Int(i32),
+    Int(i64),
     Char { val: char, terminated: bool },
     Str { val: String, terminated: bool },
     Bool(bool),
@@ -350,6 +352,7 @@ impl TokenKind {
             Self::Var => "Var".into(),
             Self::Const => "Const".into(),
             Self::Fun => "Fun".into(),
+            Self::Extern => "Extern".into(),
             Self::If => "If".into(),
             Self::ElseIf => "ElseIf".into(),
             Self::Else => "Else".into(),
