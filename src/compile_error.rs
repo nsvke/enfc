@@ -78,6 +78,16 @@ pub enum SemanticError {
     WrongMain {
         span: Span,
     },
+    InvalidLValue {
+        span: Span,
+    },
+    CannotDeref {
+        typ: TypeKind,
+        span: Span,
+    },
+    CannotAddressable {
+        span: Span,
+    },
 }
 #[derive(Debug)]
 pub enum SymbolKind {
@@ -202,6 +212,15 @@ impl CompileError {
     pub fn wrong_main(span: Span) -> Self {
         CompileError::Semantic(SemanticError::WrongMain { span })
     }
+    pub fn invalid_l_value(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::InvalidLValue { span })
+    }
+    pub fn cannot_deref(typ: TypeKind, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::CannotDeref { typ, span })
+    }
+    pub fn cannot_addressable(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::CannotAddressable { span })
+    }
 }
 
 pub trait ErrorFormatter {
@@ -232,6 +251,9 @@ impl CompileError {
             Self::Semantic(SemanticError::MissingReturn { span }) => *span,
             Self::Semantic(SemanticError::NotFoundMain { span }) => *span,
             Self::Semantic(SemanticError::WrongMain { span }) => *span,
+            Self::Semantic(SemanticError::InvalidLValue { span }) => *span,
+            Self::Semantic(SemanticError::CannotDeref { span, .. }) => *span,
+            Self::Semantic(SemanticError::CannotAddressable { span }) => *span,
         }
     }
 }

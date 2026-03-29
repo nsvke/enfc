@@ -302,6 +302,15 @@ pub mod fmt_miette_impl {
                 CompileError::Semantic(SemanticError::WrongMain { .. }) => {
                     write!(f, "'main' function is not correct")
                 }
+                CompileError::Semantic(SemanticError::CannotDeref { typ, .. }) => {
+                    write!(f, "can not deref '{}'", typ)
+                }
+                CompileError::Semantic(SemanticError::InvalidLValue { .. }) => {
+                    write!(f, "invalid lvalue")
+                }
+                CompileError::Semantic(SemanticError::CannotAddressable { .. }) => {
+                    write!(f, "can not get address for this")
+                }
             }
         }
     }

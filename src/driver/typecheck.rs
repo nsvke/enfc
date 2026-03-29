@@ -3,9 +3,10 @@
 use crate::compile_error::{CompileError, MismatchKind, SymbolKind};
 use crate::diagnostic::Diagnostics;
 use crate::driver::parse::{
-    AssignmentNode, BinaryExpressionNode, BinaryOperator, BlockNode, CallNode, Expression,
-    FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode, IndexExpressionNode, LiteralNode,
-    LiteralValue, ReturnNode, Statement, UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
+    AddressOfNode, AssignmentNode, BinaryExpressionNode, BinaryOperator, BlockNode, CallNode,
+    DerefNode, Expression, FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode,
+    IndexExpressionNode, LiteralNode, LiteralValue, ReturnNode, Statement, TypeNode,
+    UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
 };
 use crate::structs::Span;
 use phf::{Map, phf_map};
@@ -47,6 +48,7 @@ pub enum TypeKind {
         ret: Box<Type>,
         is_extern: bool,
     },
+    Reference(Box<TypeKind>),
     Unknown,
 }
 
@@ -60,6 +62,10 @@ impl std::fmt::Display for TypeKind {
             Self::Nret => write!(f, "nret"),
             Self::Function { .. } => write!(f, "function"),
             Self::Unknown => write!(f, "unknown"),
+            Self::Reference(inner) => {
+                let inn = format!("{}", inner);
+                write!(f, "&{}", inn)
+            }
         }
     }
 }
@@ -130,22 +136,29 @@ impl<'a> TypeChecker<'a> {
         self.scopes.pop();
     }
 
-    fn resolve_types(&mut self, typ: &IdentLiteralNode) -> Type {
-        let kind = match typ.value.as_str() {
-            "int" => TypeKind::Int,
-            "str" => TypeKind::Str,
-            "bool" => TypeKind::Bool,
-            "chr" => TypeKind::Char,
-            "nret" => TypeKind::Nret,
-            "" => TypeKind::Unknown,
-            val => {
-                self.diagnose
-                    .push_error(CompileError::unknown_type(val.into(), typ.span));
-                TypeKind::Unknown
+    fn resolve_types(&mut self, typ: &TypeNode) -> Type {
+        let kind = match typ {
+            TypeNode::Named(ident_node) => match ident_node.value.as_str() {
+                "int" => TypeKind::Int,
+                "str" => TypeKind::Str,
+                "bool" => TypeKind::Bool,
+                "chr" => TypeKind::Char,
+                "nret" => TypeKind::Nret,
+                "" => TypeKind::Unknown,
+                val => {
+                    self.diagnose
+                        .push_error(CompileError::unknown_type(val.into(), *typ.span()));
+                    TypeKind::Unknown
+                }
+            },
+            TypeNode::Reference { inner, .. } => {
+                let inner_type = self.resolve_types(&inner);
+                TypeKind::Reference(Box::new(inner_type.kind))
             }
         };
+
         Type {
-            span: typ.span,
+            span: *typ.span(),
             kind,
         }
     }
@@ -174,7 +187,7 @@ impl<'a> TypeChecker<'a> {
                     if node.name.value == "main" {
                         self.main_loc = Some(Span {
                             start: node.name.span.start,
-                            end: node.ret_type.span.end,
+                            end: node.ret_type.span().end,
                         });
                     }
                     let is_extern = node.is_extern;
@@ -189,7 +202,7 @@ impl<'a> TypeChecker<'a> {
                         Entry::Occupied(occupied_entry) => {
                             self.diagnose.push_error(CompileError::symbol_redefinition(
                                 node.name.value.clone(),
-                                occupied_entry.get().span,
+                                occupied_entry.get().span, // TODO only function signature's span
                                 node.name.span,
                                 SymbolKind::Function,
                             ))
@@ -282,7 +295,7 @@ impl<'a> TypeChecker<'a> {
             self.diagnose
                 .push_error(CompileError::nested_function(Span {
                     start: node.name.span.start,
-                    end: node.ret_type.span.end,
+                    end: node.ret_type.span().end,
                 }));
 
             return self.broken_typed_stmt(node.span);
@@ -295,7 +308,7 @@ impl<'a> TypeChecker<'a> {
                 // fun main () nret {
                 //     ^^^^^^^^^^^^
                 start: node.name.span.start,
-                end: node.ret_type.span.end,
+                end: node.ret_type.span().end,
             },
         ));
 
@@ -344,7 +357,7 @@ impl<'a> TypeChecker<'a> {
                     // fun main () nret {
                     //     ^^^^^^^^^^^^
                     start: node.name.span.start,
-                    end: node.ret_type.span.end,
+                    end: node.ret_type.span().end,
                 }));
             }
             typed_body_stmt.into_block_node()
@@ -514,45 +527,41 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_stmt_assign(&mut self, node: &AssignmentNode) -> TypedStatement {
-        let symbol = self.resolve_symbol(&node.left.value);
+    fn check_stmt_asgn(&mut self, node: &AssignmentNode) -> TypedStatement {
         let typed_right = self.check_expr(&node.right);
+        let typed_left = self.check_expr(&node.left);
 
-        let mut id = 0;
-        if let Some(sym) = symbol {
-            id = sym.id;
-            if sym.mutable == false {
-                self.diagnose.push_error(CompileError::not_mutable(
-                    node.left.value.clone(),
-                    node.left.span,
-                ));
-            }
-            if typed_right.typ != TypeKind::Unknown {
-                if sym.typ.kind != typed_right.typ {
-                    let typ = sym.typ.kind.clone();
-                    self.diagnose.push_error(CompileError::type_mismatch(
-                        typ,
-                        typed_right.typ.clone(),
-                        node.left.span,
-                        typed_right.span,
-                        "=".into(),
-                        MismatchKind::Regular,
-                    ));
+        match &typed_left.kind {
+            TypedExpressionKind::Ident(ident_node) => {
+                if let Some(sym) = self.resolve_symbol(&ident_node.val) {
+                    if sym.mutable == false {
+                        self.diagnose.push_error(CompileError::not_mutable(
+                            ident_node.val.clone(),
+                            typed_left.span,
+                        ));
+                    }
                 }
             }
-        } else {
-            self.diagnose.push_error(CompileError::unknown_symbol(
-                node.left.value.clone(),
-                node.left.span,
-            ));
+            TypedExpressionKind::Deref(node) => {}
+            _ => self
+                .diagnose
+                .push_error(CompileError::invalid_l_value(typed_left.span)),
+        };
+        if typed_right.typ != TypeKind::Unknown && typed_left.typ != TypeKind::Unknown {
+            if typed_left.typ != typed_right.typ {
+                self.diagnose.push_error(CompileError::type_mismatch(
+                    typed_left.typ.clone(),
+                    typed_right.typ.clone(),
+                    typed_left.span,
+                    typed_right.span,
+                    "=".into(),
+                    MismatchKind::Regular,
+                ));
+            }
         }
-
         TypedStatement {
             kind: TypedStatementKind::Assignment(TypedAssignmentNode {
-                left: IdentLiteralIdNode {
-                    value_id: id,
-                    span: node.left.span,
-                },
+                left: typed_left,
                 right: typed_right,
             }),
             span: node.span,
@@ -582,7 +591,7 @@ impl<'a> TypeChecker<'a> {
             ));
             typ = Type {
                 kind: TypeKind::Unknown,
-                span: node.var_type.span,
+                span: *node.var_type.span(),
             }
         } else if let Some(span) = old_span {
             self.diagnose.push_error(CompileError::symbol_redefinition(
@@ -593,7 +602,7 @@ impl<'a> TypeChecker<'a> {
             ));
             typ = Type {
                 kind: TypeKind::Unknown,
-                span: node.var_type.span,
+                span: *node.var_type.span(),
             }
         } else {
             typ = self.resolve_types(&node.var_type);
@@ -650,7 +659,7 @@ impl<'a> TypeChecker<'a> {
     fn check_stmt(&mut self, stmt: &Statement) -> TypedStatement {
         match stmt {
             Statement::VarDeclaration(node) => self.check_stmt_val(node),
-            Statement::Assignment(node) => self.check_stmt_assign(node),
+            Statement::Assignment(node) => self.check_stmt_asgn(node),
             Statement::If(node) => self.check_stmt_if(node),
             Statement::While(node) => self.check_stmt_while(node),
             Statement::FunDefinition(node) => self.check_stmt_fun(node),
@@ -911,6 +920,49 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn check_expr_addressof(&mut self, node: &AddressOfNode) -> TypedExpression {
+        let typed_inner = self.check_expr(&node.inner);
+        if let TypedExpressionKind::Ident(ident) = &typed_inner.kind {
+            if let Some(sym) = self.resolve_symbol(&ident.val) {
+                if !sym.mutable {
+                    self.diagnose
+                        .push_error(CompileError::not_mutable(ident.val.clone(), node.span));
+                }
+            }
+        } else {
+            self.diagnose
+                .push_error(CompileError::cannot_addressable(typed_inner.span));
+        }
+
+        TypedExpression {
+            typ: TypeKind::Reference(Box::new(typed_inner.typ.clone())),
+            kind: TypedExpressionKind::AddressOf(TypedAddressOfNode {
+                inner: Box::new(typed_inner),
+            }),
+            span: node.span,
+        }
+    }
+
+    fn check_expr_deref(&mut self, node: &DerefNode) -> TypedExpression {
+        let typed_inner = self.check_expr(&node.inner);
+        let resolved = match &typed_inner.typ {
+            TypeKind::Reference(inner) => *inner.clone(),
+            TypeKind::Unknown => TypeKind::Unknown,
+            typ => {
+                self.diagnose
+                    .push_error(CompileError::cannot_deref(typ.clone(), node.span));
+                TypeKind::Unknown
+            }
+        };
+        TypedExpression {
+            kind: TypedExpressionKind::Deref(TypedDerefNode {
+                inner: Box::new(typed_inner),
+            }),
+            typ: resolved,
+            span: node.span,
+        }
+    }
+
     fn check_expr(&mut self, expr: &Expression) -> TypedExpression {
         match expr {
             Expression::Binary(node) => self.check_expr_binary(node),
@@ -918,6 +970,8 @@ impl<'a> TypeChecker<'a> {
             Expression::Literal(node) => self.check_expr_literal(node),
             Expression::Ident(node) => self.check_expr_ident(node),
             Expression::Call(node) => self.check_expr_call(node),
+            Expression::AddressOf(node) => self.check_expr_addressof(node),
+            Expression::Deref(node) => self.check_expr_deref(node),
             Expression::Index(node) => self.check_expr_index(node),
             Expression::FieldAccess(node) => self.check_expr_field(node),
             Expression::Broken(span) => self.broken_typed_expr(*span),
@@ -992,7 +1046,7 @@ pub(crate) struct TypedVarDecNode {
 }
 #[derive(Debug)]
 pub(crate) struct TypedAssignmentNode {
-    pub left: IdentLiteralIdNode,
+    pub left: TypedExpression,
     pub right: TypedExpression,
 }
 
@@ -1010,6 +1064,8 @@ pub(crate) enum TypedExpressionKind {
     Literal(LiteralNode),
     Ident(IdentLiteralTuple),
     Call(TypedCallNode),
+    AddressOf(TypedAddressOfNode),
+    Deref(TypedDerefNode),
     Index(TypedIndexExpressionNode),
     FieldAccess(TypedFieldAccessNode),
     Broken,
@@ -1044,6 +1100,15 @@ pub(crate) struct TypedCallNode {
     pub is_extern: bool,
 }
 
+#[derive(Debug)]
+pub(crate) struct TypedAddressOfNode {
+    pub inner: Box<TypedExpression>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TypedDerefNode {
+    pub inner: Box<TypedExpression>,
+}
 #[derive(Debug)]
 pub(crate) struct TypedReturnNode {
     pub value: Option<TypedExpression>,

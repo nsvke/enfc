@@ -1,0 +1,47 @@
+extern fun putchar(c int) int;
+extern fun puts(text str) int;
+
+fun print_int_h(i int) nret {
+    if i > 9 {
+        print_int_h(i / 10);
+    }
+    val remainder = i % 10;
+    putchar(remainder + 48);
+}
+
+fun print_int(i int) nret {
+    if i == 0 {
+        putchar(48);
+    } else {
+        print_int_h(i);
+    }
+    putchar(10);
+}
+
+fun main() nret {
+    var x = 12;
+    val ref_x = &x;
+    *ref_x = 99;
+
+    if x == 12 {
+        puts("noo.");
+    } elsf x == 99 {
+        puts("yes");
+    }
+
+    var y = 13;
+    val ref_y &int = &y;
+    *ref_y = 42;
+
+    print_int(*ref_y);
+    print_int(y);
+
+    var msg = "Hello World!";
+    val ref_msg = &msg;
+
+    puts(*ref_msg);
+
+    *ref_msg = "Hello Enf!";
+
+    puts(msg);
+}

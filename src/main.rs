@@ -41,7 +41,7 @@ fn main() -> Result<()> {
     if output.status.success() {
         println!("compiled successfuly");
     } else {
-        eprintln!("an error occured while compiling")
+        eprintln!("an error occured while compiling \n ---> \n{:?}", output)
     }
 
     println!("--------------------------------");

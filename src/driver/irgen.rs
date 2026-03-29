@@ -4,10 +4,11 @@ use crate::driver::{
     TypeKind,
     parse::{BinaryOperator, LiteralNode, LiteralValue, UnaryOperator},
     typecheck::{
-        IdentLiteralTuple, Type, TypedAssignmentNode, TypedBinaryExpressionNode, TypedBlockNode,
-        TypedCallNode, TypedExpression, TypedExpressionKind, TypedFieldAccessNode, TypedFunDefNode,
-        TypedIfNode, TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
-        TypedUnaryExpressionNode, TypedVarDecNode, TypedWhileNode,
+        IdentLiteralTuple, TypedAddressOfNode, TypedAssignmentNode, TypedBinaryExpressionNode,
+        TypedBlockNode, TypedCallNode, TypedDerefNode, TypedExpression, TypedExpressionKind,
+        TypedFieldAccessNode, TypedFunDefNode, TypedIfNode, TypedIndexExpressionNode,
+        TypedReturnNode, TypedStatement, TypedStatementKind, TypedUnaryExpressionNode,
+        TypedVarDecNode, TypedWhileNode,
     },
 };
 
@@ -21,6 +22,9 @@ pub enum Instruction {
     Load(usize),
     Store(usize),
     Init(usize, IrType),
+    AddressOf(usize),
+    LoadIndirect,
+    StoreIndirect,
 
     // Binary
     Add,
@@ -141,19 +145,25 @@ impl IrGenerator {
         let fun_id = self.get_fun_id(node.name.value.clone());
 
         if !node.is_extern {
-            self.emit(Instruction::FunStart(fun_id, (&node.ret_type).into()));
+            self.emit(Instruction::FunStart(fun_id, (&node.ret_type.kind).into()));
             for param in &node.parameters {
-                self.emit(Instruction::FunParam(param.0.value_id, (&param.1).into()));
+                self.emit(Instruction::FunParam(
+                    param.0.value_id,
+                    (&param.1.kind).into(),
+                ));
             }
             self.emit(Instruction::FunBodyStart);
             self.gen_from_stmt_block(&node.body);
             self.emit(Instruction::FunEnd);
         } else {
-            self.emit(Instruction::ExternFunStart(fun_id, (&node.ret_type).into()));
+            self.emit(Instruction::ExternFunStart(
+                fun_id,
+                (&node.ret_type.kind).into(),
+            ));
             for param in &node.parameters {
                 self.emit(Instruction::ExternFunParam(
                     param.0.value_id,
-                    (&param.1).into(),
+                    (&param.1.kind).into(),
                 ));
             }
             self.emit(Instruction::ExternFunEnd);
@@ -210,9 +220,17 @@ impl IrGenerator {
         self.emit(Instruction::Ret(has_value));
     }
 
-    fn gen_from_stmt_assign(&mut self, node: &TypedAssignmentNode) {
+    fn gen_from_stmt_asgn(&mut self, node: &TypedAssignmentNode) {
         self.gen_from_expr(&node.right);
-        self.emit(Instruction::Store(node.left.value_id));
+
+        match &node.left.kind {
+            TypedExpressionKind::Ident(ident) => self.emit(Instruction::Store(ident.id)),
+            TypedExpressionKind::Deref(node) => {
+                self.gen_from_expr(&node.inner);
+                self.emit(Instruction::StoreIndirect);
+            }
+            _ => unreachable!("only ident, deref"),
+        }
     }
 
     fn gen_from_stmt_val(&mut self, node: &TypedVarDecNode) {
@@ -220,14 +238,14 @@ impl IrGenerator {
 
         self.emit(Instruction::Init(
             node.name_id.value_id,
-            (&node.var_type).into(),
+            (&node.var_type.kind).into(),
         ));
     }
 
     fn gen_from_stmt(&mut self, stmt: &TypedStatement) {
         match &stmt.kind {
             TypedStatementKind::VarDeclaration(node) => self.gen_from_stmt_val(node),
-            TypedStatementKind::Assignment(node) => self.gen_from_stmt_assign(node),
+            TypedStatementKind::Assignment(node) => self.gen_from_stmt_asgn(node),
             TypedStatementKind::If(node) => self.gen_from_stmt_if(node),
             TypedStatementKind::While(node) => self.gen_from_stmt_while(node),
             TypedStatementKind::FunDefinition(node) => self.gen_from_stmt_fun(node),
@@ -357,6 +375,19 @@ impl IrGenerator {
         };
     }
 
+    fn gen_from_expr_addressof(&mut self, node: &TypedAddressOfNode) {
+        if let TypedExpressionKind::Ident(ident) = &node.inner.kind {
+            self.emit(Instruction::AddressOf(ident.id));
+        } else {
+            unimplemented!("address of works for only ident yet")
+        }
+    }
+
+    fn gen_from_expr_deref(&mut self, node: &TypedDerefNode) {
+        self.gen_from_expr(&node.inner);
+        self.emit(Instruction::LoadIndirect);
+    }
+
     fn gen_from_expr(&mut self, expr: &TypedExpression) {
         match &expr.kind {
             TypedExpressionKind::Binary(node) => self.gen_from_expr_binary(node),
@@ -364,6 +395,8 @@ impl IrGenerator {
             TypedExpressionKind::Literal(node) => self.gen_from_expr_literal(node),
             TypedExpressionKind::Ident(node) => self.gen_from_expr_ident(node),
             TypedExpressionKind::Call(node) => self.gen_from_expr_call(node),
+            TypedExpressionKind::AddressOf(node) => self.gen_from_expr_addressof(node),
+            TypedExpressionKind::Deref(node) => self.gen_from_expr_deref(node),
             TypedExpressionKind::Index(node) => self.gen_from_expr_index(node),
             TypedExpressionKind::FieldAccess(node) => self.gen_from_expr_field(node),
             TypedExpressionKind::Broken => {
@@ -431,24 +464,29 @@ impl IrProgram {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrType {
     I32,
     Bool,
     Char,
     Str,
     Void,
+    Reference(Box<IrType>),
 }
 
-impl From<&Type> for IrType {
-    fn from(value: &Type) -> Self {
-        match &value.kind {
+impl From<&TypeKind> for IrType {
+    fn from(value: &TypeKind) -> Self {
+        match &value {
             TypeKind::Int => Self::I32,
             TypeKind::Bool => Self::Bool,
             TypeKind::Char => Self::Char,
             TypeKind::Str => Self::Str,
-            TypeKind::Function { ret, .. } => Self::from(ret.as_ref()),
+            TypeKind::Function { ret, .. } => Self::from(&ret.kind),
             TypeKind::Nret => Self::Void,
+            TypeKind::Reference(inner_type) => {
+                let inner = Self::from(&(**inner_type));
+                IrType::Reference(Box::new(inner))
+            }
             TypeKind::Unknown => unreachable!("unknown type is imposible here"),
         }
     }

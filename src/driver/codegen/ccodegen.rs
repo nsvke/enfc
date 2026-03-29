@@ -8,17 +8,18 @@ use crate::driver::{
 };
 
 trait AsCType {
-    fn as_c_type(&self) -> &'static str;
+    fn as_c_type(&self) -> String;
 }
 
 impl AsCType for IrType {
-    fn as_c_type(&self) -> &'static str {
+    fn as_c_type(&self) -> String {
         match self {
-            IrType::I32 => "int", //"int64_t",
-            IrType::Bool => "bool",
-            IrType::Char => "char",
-            IrType::Str => "const char*",
-            IrType::Void => "void",
+            IrType::I32 => "int".into(), //"int64_t",
+            IrType::Bool => "bool".into(),
+            IrType::Char => "char".into(),
+            IrType::Str => "const char*".into(),
+            IrType::Void => "void".into(),
+            IrType::Reference(inner_type) => format!("{}*", inner_type.as_c_type()),
         }
     }
 }
@@ -89,6 +90,18 @@ impl<'a> CCodeGen<'a> {
                         *id,
                         r
                     ));
+                }
+                Instruction::AddressOf(id) => {
+                    self.stack.push(format!("&enf_var_{}", id));
+                }
+                Instruction::LoadIndirect => {
+                    let addr = self.stack_pop();
+                    self.stack.push(format!("*({})", addr));
+                }
+                Instruction::StoreIndirect => {
+                    let addr = self.stack_pop();
+                    let val = self.stack_pop();
+                    self.output.push_str(&format!("*({}) = {};\n", addr, val));
                 }
                 Instruction::Add => {
                     let (l, r) = self.stack_pop_binary();
@@ -170,11 +183,7 @@ impl<'a> CCodeGen<'a> {
                     self.current_params.clear();
                 }
                 Instruction::ExternFunParam(id, typ) => {
-                    self.current_params.push(format!(
-                        "{} enf_extern_param_{}",
-                        typ.as_c_type(),
-                        *id
-                    )); // TODO no name mangle for extern fun params
+                    self.current_params.push(typ.as_c_type()); // TODO no name mangle for extern fun params
                 }
                 Instruction::ExternFunEnd => {
                     self.output.push_str(&self.current_params.join(", "));

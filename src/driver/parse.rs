@@ -86,9 +86,8 @@ impl<'a> Parser<'a> {
             While => Some(self.parse_while()),
             OpenBrace => Some(self.parse_block()),
             Ret => Some(self.parse_ret()),
-            Ident(_) if self.peek_at(1).kind == Eq => Some(self.parse_asgn()),
-            Ident(_) | Literal(_) | OpenParam | Bang | Minus => {
-                Some(Statement::ExpressionStatement(self.parse_expr_stmt()))
+            Ident(_) | Literal(_) | OpenParam | Bang | Minus | And | Star => {
+                Some(self.parse_expr_stmt())
             }
             Semi | Eof => {
                 self.consume_quietly();
@@ -270,26 +269,9 @@ impl<'a> Parser<'a> {
                 span: p_name_token.span,
             };
 
-            let p_type_token = match self.consume() {
-                t if matches!(t.kind, Ident(_)) => t,
-                found => {
-                    let err = CompileError::unexpected_token(
-                        Ident("param_type".to_string()),
-                        found.kind.clone(),
-                        found.span,
-                    );
-                    self.diagnose.push_error(err);
-                    return self.sync();
-                }
-            };
-            let p_type_str = if let Ident(s) = &p_type_token.kind {
-                s.clone()
-            } else {
-                String::new()
-            };
-            let p_type_node = IdentLiteralNode {
-                value: p_type_str,
-                span: p_type_token.span,
+            let p_type_node = match self.parse_type() {
+                Ok(typ) => typ,
+                Err(broken) => return broken,
             };
 
             parameters.push((p_name_node, p_type_node));
@@ -303,26 +285,9 @@ impl<'a> Parser<'a> {
             return broken.into();
         }
 
-        let type_token = if let Ident(_) = self.peek().kind {
-            self.consume()
-        } else {
-            let found = self.peek();
-            let err = CompileError::unexpected_token(
-                Ident("ret_type".to_string()),
-                found.kind.clone(),
-                found.span,
-            );
-            self.diagnose.push_error(err);
-            return self.sync();
-        };
-        let type_str = if let Ident(s) = &type_token.kind {
-            s.clone()
-        } else {
-            String::new()
-        };
-        let type_node = IdentLiteralNode {
-            value: type_str,
-            span: type_token.span,
+        let type_node = match self.parse_type() {
+            Ok(typ) => typ,
+            Err(broken) => return broken,
         };
 
         if let Err(broken) = self.expect(Semi) {
@@ -334,7 +299,7 @@ impl<'a> Parser<'a> {
             parameters,
             span: Span {
                 start: fun_token.span.start,
-                end: type_node.span.end,
+                end: type_node.span().end,
             },
             body: BlockNode {
                 body: Vec::new(),
@@ -399,26 +364,9 @@ impl<'a> Parser<'a> {
                 span: p_name_token.span,
             };
 
-            let p_type_token = match self.consume() {
-                t if matches!(t.kind, Ident(_)) => t,
-                found => {
-                    let err = CompileError::unexpected_token(
-                        Ident("param_type".to_string()),
-                        found.kind.clone(),
-                        found.span,
-                    );
-                    self.diagnose.push_error(err);
-                    return self.sync();
-                }
-            };
-            let p_type_str = if let Ident(s) = &p_type_token.kind {
-                s.clone()
-            } else {
-                String::new()
-            };
-            let p_type_node = IdentLiteralNode {
-                value: p_type_str,
-                span: p_type_token.span,
+            let p_type_node = match self.parse_type() {
+                Ok(typ) => typ,
+                Err(broken) => return broken,
             };
 
             parameters.push((p_name_node, p_type_node));
@@ -432,26 +380,9 @@ impl<'a> Parser<'a> {
             return broken.into();
         }
 
-        let type_token = if let Ident(_) = self.peek().kind {
-            self.consume()
-        } else {
-            let found = self.peek();
-            let err = CompileError::unexpected_token(
-                Ident("ret_type".to_string()),
-                found.kind.clone(),
-                found.span,
-            );
-            self.diagnose.push_error(err);
-            return self.sync();
-        };
-        let type_str = if let Ident(s) = &type_token.kind {
-            s.clone()
-        } else {
-            String::new()
-        };
-        let type_node = IdentLiteralNode {
-            value: type_str,
-            span: type_token.span,
+        let type_node = match self.parse_type() {
+            Ok(typ) => typ,
+            Err(broken) => return broken,
         };
 
         let body_stmt = self.parse_block();
@@ -531,20 +462,7 @@ impl<'a> Parser<'a> {
     }
 
     // ident = expr;
-    fn parse_asgn(&mut self) -> Statement {
-        let name_token = match self.consume() {
-            t if matches!(t.kind, Ident(_)) => t,
-            _ => {
-                // error unexpected token, expected identifier
-                return self.sync();
-            }
-        };
-        let name_str = if let Ident(s) = &name_token.kind {
-            s.clone()
-        } else {
-            String::new()
-        };
-
+    fn parse_asgn(&mut self, left_expr: Expression) -> Statement {
         if let Err(broken) = self.expect(Eq) {
             return broken.into();
         }
@@ -557,15 +475,12 @@ impl<'a> Parser<'a> {
         };
 
         Statement::Assignment(AssignmentNode {
-            left: IdentLiteralNode {
-                value: name_str,
-                span: name_token.span,
-            },
-            right: expr,
             span: Span {
-                start: name_token.span.start,
+                start: left_expr.get_span().start,
                 end: semi_token.span.end,
             },
+            left: left_expr,
+            right: expr,
         })
     }
 
@@ -597,27 +512,13 @@ impl<'a> Parser<'a> {
             span: name_token.span,
         };
 
-        let type_node = match self.peek().kind {
-            Eq => None,
-            Ident(_) => {
-                let t = self.consume();
-                let s = if let Ident(val) = &t.kind {
-                    val.clone()
-                } else {
-                    String::new()
-                };
-                Some(IdentLiteralNode {
-                    value: s,
-                    span: t.span,
-                })
+        let type_node = if self.peek().kind != Eq {
+            match self.parse_type() {
+                Ok(node) => Some(node),
+                Err(sync_stmt) => return sync_stmt,
             }
-            _ => {
-                // expected Eq or Ident(Type) // todo! need multi expected support
-                let found = self.peek();
-                let err = CompileError::unexpected_token(Eq, found.kind.clone(), found.span); // Approximation
-                self.diagnose.push_error(err);
-                return self.sync();
-            }
+        } else {
+            None
         };
 
         if let Err(broken) = self.expect(Eq) {
@@ -633,10 +534,10 @@ impl<'a> Parser<'a> {
 
         Statement::VarDeclaration(VarDecNode {
             name: name_node,
-            var_type: type_node.unwrap_or(IdentLiteralNode {
+            var_type: type_node.unwrap_or(TypeNode::Named(IdentLiteralNode {
                 value: String::new(),
                 span: Span::default(),
-            }),
+            })),
             initalizer: expr,
             mutable: val_or_var.kind == TokenKind::Var,
             span: Span {
@@ -644,6 +545,36 @@ impl<'a> Parser<'a> {
                 end: semi_token.span.end,
             },
         })
+    }
+
+    fn parse_type(&mut self) -> Result<TypeNode, Statement> {
+        let token = self.peek();
+        match &token.kind {
+            And => {
+                let and_token = self.consume();
+                let inner_type = self.parse_type()?;
+                Ok(TypeNode::Reference {
+                    inner: Box::new(inner_type),
+                    span: and_token.span, // TODO add merged span
+                })
+            }
+            Ident(val) => {
+                let ident_token = self.consume();
+                Ok(TypeNode::Named(IdentLiteralNode {
+                    value: val.clone(),
+                    span: ident_token.span,
+                }))
+            }
+            _ => {
+                let err = CompileError::unexpected_token(
+                    InvalidIdent("type".into()),
+                    token.kind.clone(),
+                    token.span,
+                ); // Approximation
+                self.diagnose.push_error(err);
+                Err(self.sync())
+            }
+        }
     }
 
     fn sync(&mut self) -> Statement {
@@ -673,19 +604,22 @@ impl<'a> Parser<'a> {
         Span { start, end }
     }
 
-    fn parse_expr_stmt(&mut self) -> Expression {
-        let result = self.parse_precedence(Precedence::Assignment);
-        let semi_token = self.peek();
-        if semi_token.kind == TokenKind::Semi {
+    fn parse_expr_stmt(&mut self) -> Statement {
+        let result = self.parse_precedence(Precedence::Or); // Precedence::Assignment + 1
+        let next_token = self.peek();
+        if next_token.kind == TokenKind::Semi {
             self.consume_quietly();
+        } else if next_token.kind == Eq {
+            return self.parse_asgn(result);
         } else {
             self.diagnose.push_error(CompileError::unexpected_token(
                 TokenKind::Semi,
-                semi_token.kind.clone(),
-                semi_token.span,
+                next_token.kind.clone(),
+                next_token.span,
             ));
+            return Statement::Broken(result.get_span()); // to prevent duplicate errors
         }
-        return result;
+        return Statement::ExpressionStatement(result);
     }
 
     fn parse_expr(&mut self) -> Expression {
@@ -709,6 +643,7 @@ impl<'a> Parser<'a> {
             Literal(_) => self.parse_literal_expr(),
             OpenParam => self.parse_groupping(),
             Bang | Minus => self.parse_unary(),
+            And | Star => self.parse_reference(),
             CloseParam | CloseBrace | OpenBrace | Semi | Eof | Comma => {
                 let err = CompileError::unexpected_token(
                     InvalidIdent("expr".into()),
@@ -946,6 +881,29 @@ impl<'a> Parser<'a> {
             span,
         })
     }
+
+    fn parse_reference(&mut self) -> Expression {
+        let token = self.consume();
+        let inner = self.parse_precedence(Precedence::Unary);
+
+        match token.kind {
+            And => Expression::AddressOf(AddressOfNode {
+                span: Span {
+                    start: token.span.start,
+                    end: inner.get_span().end,
+                },
+                inner: Box::new(inner),
+            }),
+            Star => Expression::Deref(DerefNode {
+                span: Span {
+                    start: token.span.start,
+                    end: inner.get_span().end,
+                },
+                inner: Box::new(inner),
+            }),
+            _ => unreachable!(),
+        }
+    }
 }
 
 pub(crate) enum Statement {
@@ -1005,8 +963,8 @@ impl fmt::Debug for BlockNode {
 
 pub(crate) struct FunDefNode {
     pub name: IdentLiteralNode,
-    pub parameters: Vec<(IdentLiteralNode, IdentLiteralNode)>,
-    pub ret_type: IdentLiteralNode,
+    pub parameters: Vec<(IdentLiteralNode, TypeNode)>,
+    pub ret_type: TypeNode,
     pub body: BlockNode,
     pub is_extern: bool,
     pub span: Span,
@@ -1096,7 +1054,7 @@ impl fmt::Debug for WhileNode {
 
 pub(crate) struct VarDecNode {
     pub name: IdentLiteralNode,
-    pub var_type: IdentLiteralNode,
+    pub var_type: TypeNode,
     pub initalizer: Expression,
     pub mutable: bool,
     pub span: Span,
@@ -1118,7 +1076,7 @@ impl fmt::Debug for VarDecNode {
 }
 
 pub(crate) struct AssignmentNode {
-    pub left: IdentLiteralNode,
+    pub left: Expression,
     pub right: Expression,
     pub span: Span,
 }
@@ -1189,7 +1147,7 @@ enum Precedence {
     Comparison, // < > <= >=
     Term,       // + -
     Factor,     // * / %
-    Unary,      // ! -
+    Unary,      // ! - (also * &)
     Call,       // () [] .
     Primary,    // Literal Ident Grouping
 }
@@ -1230,6 +1188,8 @@ pub(crate) enum Expression {
     Literal(LiteralNode),
     Ident(IdentLiteralNode),
     Call(CallNode),
+    AddressOf(AddressOfNode),
+    Deref(DerefNode),
     Index(IndexExpressionNode),
     FieldAccess(FieldAccessNode),
     Broken(Span),
@@ -1241,6 +1201,8 @@ impl fmt::Debug for Expression {
             Self::Unary(n) => n.fmt(f),
             Self::Literal(n) => n.fmt(f),
             Self::Ident(n) => n.fmt(f),
+            Self::AddressOf(n) => n.fmt(f),
+            Self::Deref(n) => n.fmt(f),
             Self::Call(n) => n.fmt(f),
             Self::Index(n) => n.fmt(f),
             Self::FieldAccess(n) => n.fmt(f),
@@ -1261,6 +1223,8 @@ impl Expression {
             Self::Literal(x) => x.span,
             Self::Ident(x) => x.span,
             Self::Call(x) => x.span,
+            Self::AddressOf(x) => x.span,
+            Self::Deref(x) => x.span,
             Self::Index(x) => x.span,
             Self::FieldAccess(x) => x.span,
             Self::Broken(x) => *x,
@@ -1414,6 +1378,21 @@ impl fmt::Debug for IdentLiteralNode {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum TypeNode {
+    Named(IdentLiteralNode),
+    Reference { inner: Box<TypeNode>, span: Span },
+}
+
+impl TypeNode {
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Named(node) => &node.span,
+            Self::Reference { span, .. } => span,
+        }
+    }
+}
+
 pub(crate) struct ReturnNode {
     pub value: Option<Expression>,
     pub span: Span,
@@ -1430,6 +1409,18 @@ impl fmt::Debug for ReturnNode {
             Option::None => write!(f, "nret"),
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct AddressOfNode {
+    pub inner: Box<Expression>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct DerefNode {
+    pub inner: Box<Expression>,
+    pub span: Span,
 }
 
 #[cfg(test)]
@@ -1494,7 +1485,11 @@ mod tests {
             assert_eq!(node.parameters.len(), 2);
             assert_eq!(node.parameters[0].0.value, "a");
             assert_eq!(node.parameters[1].0.value, "b");
-            assert_eq!(node.ret_type.value, "int");
+            let type_str = match &node.ret_type {
+                TypeNode::Named(node) => &node.value,
+                _ => unreachable!(),
+            };
+            assert_eq!(type_str, "int");
         } else {
             panic!("Expected FunDefinition");
         }
