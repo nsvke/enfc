@@ -894,6 +894,7 @@ impl<'a> Parser<'a> {
                     }
                     LiteralValue::Char(*val)
                 }
+                Float(fl) => LiteralValue::FloatNumber(*fl),
             };
             Expression::Literal(LiteralNode {
                 value: val,
@@ -1560,6 +1561,7 @@ impl fmt::Debug for LiteralNode {
 #[derive(Debug, Clone)]
 pub(crate) enum LiteralValue {
     Number(i32),
+    FloatNumber(f32),
     Str(String),
     Bool(bool),
     Char(char),

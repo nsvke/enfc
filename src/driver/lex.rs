@@ -91,7 +91,7 @@ impl Token {
 }
 
 #[allow(unused)]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub enum TokenKind {
     LineComment, // "--"
     WhiteSpace,
@@ -175,9 +175,10 @@ pub enum TokenKind {
 }
 
 #[allow(unused)]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub enum LiteralKind {
     Int(i32),
+    Float(f32),
     Char { val: char, terminated: bool },
     Str { val: String, terminated: bool },
     Bool(bool),
@@ -199,6 +200,7 @@ impl std::fmt::Debug for LiteralKind {
                 )
             }
             Self::Bool(b) => write!(f, "{b:?}"),
+            Self::Float(fl) => write!(f, "{fl:?}",),
         }
     }
 }
@@ -416,6 +418,20 @@ impl<'a> Lexer<'a> {
                 let literal = self.is_char_literal();
                 self.push_c_literal_token(literal, off);
             } else if let Some(sym) = is_symbol(c) {
+                // FLOAT PATCH START
+                if sym == TokenKind::Dot {
+                    let is_all_digits = !self.buffer.chars.is_empty()
+                        && self.buffer.chars.chars().all(|ch| ch.is_ascii_digit());
+                    if is_all_digits {
+                        if let Some((_, next_c)) = self.iter.peek() {
+                            if next_c.is_ascii_digit() {
+                                self.buffer.chars.push(c);
+                                continue;
+                            }
+                        }
+                    }
+                }
+                // FLOAT PATCH END
                 self.push_ident_token(off);
                 if let Some(d_sym) = self.try_double_symbol(c) {
                     let (end, _) = self.iter.next().unwrap();
@@ -528,8 +544,10 @@ impl<'a> Lexer<'a> {
             token.clone()
         } else if let Some(token) = KEYWORDS.get(&self.buffer.chars) {
             token.clone()
-        } else if is_digit(&self.buffer.chars) {
-            TokenKind::Literal(LiteralKind::Int(self.buffer.chars.parse().unwrap()))
+        } else if let Ok(i) = self.buffer.chars.parse() {
+            TokenKind::Literal(LiteralKind::Int(i))
+        } else if let Ok(fl) = self.buffer.chars.parse() {
+            TokenKind::Literal(LiteralKind::Float(fl))
         } else if self.buffer.chars == "true" {
             TokenKind::Literal(LiteralKind::Bool(true))
         } else if self.buffer.chars == "false" {
@@ -616,10 +634,6 @@ fn is_ident(string: &str) -> bool {
     } else {
         false
     }
-}
-
-fn is_digit(string: &str) -> bool {
-    string.chars().all(|c| c.is_ascii_digit())
 }
 
 fn is_symbol(c: char) -> Option<TokenKind> {

@@ -12,9 +12,10 @@ use crate::driver::{
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     PushInt(i32),
+    PushFloat(f32),
     PushBool(bool),
     PushChar(char),
     PushStrId(usize),
@@ -443,6 +444,7 @@ impl IrGenerator {
             }
             LiteralValue::Bool(v) => self.emit(Instruction::PushBool(*v)),
             LiteralValue::Char(v) => self.emit(Instruction::PushChar(*v)),
+            LiteralValue::FloatNumber(v) => self.emit(Instruction::PushFloat(*v)),
         };
     }
 
@@ -546,6 +548,7 @@ impl IrProgram {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrType {
     I32,
+    F32,
     Bool,
     Char,
     Str,
@@ -557,6 +560,7 @@ impl From<&TypeKind> for IrType {
     fn from(value: &TypeKind) -> Self {
         match &value {
             TypeKind::Int => Self::I32,
+            TypeKind::Float => Self::F32,
             TypeKind::Bool => Self::Bool,
             TypeKind::Char => Self::Char,
             TypeKind::Str => Self::Str,

@@ -15,6 +15,7 @@ impl AsCType for IrType {
     fn as_c_type(&self) -> String {
         match self {
             IrType::I32 => "int".into(), //"int64_t",
+            IrType::F32 => "float".into(),
             IrType::Bool => "bool".into(),
             IrType::Char => "char".into(),
             IrType::Str => "const char*".into(),
@@ -63,22 +64,15 @@ impl<'a> CCodeGen<'a> {
             }
 
             match instr {
-                Instruction::PushInt(i) => {
-                    self.stack.push(i.to_string());
-                }
-                Instruction::PushBool(b) => {
-                    self.stack.push(b.to_string());
-                }
-                Instruction::PushChar(c) => {
-                    self.stack.push(format!("'{}'", c));
-                }
+                Instruction::PushInt(i) => self.stack.push(i.to_string()),
+                Instruction::PushFloat(fl) => self.stack.push(fl.to_string()),
+                Instruction::PushBool(b) => self.stack.push(b.to_string()),
+                Instruction::PushChar(c) => self.stack.push(format!("'{}'", c)),
                 Instruction::PushStrId(id) => {
                     let s = self.ir.get_str(*id);
                     self.stack.push(format!("\"{}\"", s));
                 }
-                Instruction::Load(id) => {
-                    self.stack.push(format!("enf_var_{}", id));
-                }
+                Instruction::Load(id) => self.stack.push(format!("enf_var_{}", id)),
                 Instruction::Store(id) => {
                     let r = self.stack_pop();
                     output.push_str(&format!("enf_var_{} = {};\n", *id, r));
@@ -87,9 +81,7 @@ impl<'a> CCodeGen<'a> {
                     let r = self.stack_pop();
                     output.push_str(&format!("{} enf_var_{} = {};\n", typ.as_c_type(), *id, r));
                 }
-                Instruction::AddressOf(id) => {
-                    self.stack.push(format!("&enf_var_{}", id));
-                }
+                Instruction::AddressOf(id) => self.stack.push(format!("&enf_var_{}", id)),
                 Instruction::LoadIndirect => {
                     let addr = self.stack_pop();
                     self.stack.push(format!("*({})", addr));
@@ -207,7 +199,7 @@ impl<'a> CCodeGen<'a> {
                 }
                 Instruction::FunParam(id, typ) => {
                     self.current_params
-                        .push(format!("{} enf_var_{}", typ.as_c_type(), *id));
+                        .push(format!("{} enf_var_{}", typ.as_c_type(), *id))
                 }
                 Instruction::FunBodyStart => {
                     let params = self.current_params.join(", ");
@@ -220,9 +212,7 @@ impl<'a> CCodeGen<'a> {
                     self.fun_signs.push(self.current_fun_sign.clone());
                     self.current_fun_sign.clear();
                 }
-                Instruction::FunEnd => {
-                    output.push_str("}\n");
-                }
+                Instruction::FunEnd => output.push_str("}\n"),
                 Instruction::Discard => {
                     let val = self.stack_pop();
                     output.push_str(&format!("{};\n", val));

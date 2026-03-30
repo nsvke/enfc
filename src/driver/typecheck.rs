@@ -38,6 +38,7 @@ impl Type {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeKind {
     Int,
+    Float,
     Str,
     Bool,
     Char,
@@ -53,10 +54,17 @@ pub enum TypeKind {
     Unknown,
 }
 
+impl TypeKind {
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Self::Int | Self::Float)
+    }
+}
+
 impl std::fmt::Display for TypeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int => write!(f, "int"),
+            Self::Float => write!(f, "flt"),
             Self::Str => write!(f, "str"),
             Self::Bool => write!(f, "bool"),
             Self::Char => write!(f, "chr"),
@@ -143,6 +151,7 @@ impl<'a> TypeChecker<'a> {
         let kind = match typ {
             TypeNode::Named(ident_node) => match ident_node.value.as_str() {
                 "int" => TypeKind::Int,
+                "flt" => TypeKind::Float,
                 "str" => TypeKind::Str,
                 "bool" => TypeKind::Bool,
                 "chr" => TypeKind::Char,
@@ -905,55 +914,62 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_expr_binary(&mut self, node: &BinaryExpressionNode) -> TypedExpression {
-        let (expected_op, final_type) = match node.op {
-            BinaryOperator::Add
-            | BinaryOperator::Sub
-            | BinaryOperator::Mul
-            | BinaryOperator::Div
-            | BinaryOperator::Percent => (TypeKind::Int, TypeKind::Int),
-            BinaryOperator::Greater
-            | BinaryOperator::Less
-            | BinaryOperator::GreaterEquals
-            | BinaryOperator::LessEquals => (TypeKind::Int, TypeKind::Bool),
-            BinaryOperator::And | BinaryOperator::Or => (TypeKind::Bool, TypeKind::Bool),
-            BinaryOperator::IsEquals | BinaryOperator::IsNotEquals => {
-                (TypeKind::Unknown, TypeKind::Bool)
-            }
-        };
-
         let typed_left = self.check_expr(&node.left);
         let typed_right = self.check_expr(&node.right);
 
-        let mut typ = final_type.clone();
+        let mut typ = TypeKind::Unknown;
 
-        if typed_left.typ == TypeKind::Unknown || typed_right.typ == TypeKind::Unknown {
-            typ = TypeKind::Unknown;
-        }
+        let expected_error = CompileError::type_mismatch(
+            typed_left.typ.clone(),
+            typed_right.typ.clone(),
+            typed_left.span,
+            typed_right.span,
+            format!("{:?}", node.op),
+            MismatchKind::Binary,
+        );
 
-        if typ != TypeKind::Unknown {
-            if expected_op != TypeKind::Unknown {
-                if typed_left.typ != expected_op || typed_right.typ != expected_op {
-                    self.diagnose.push_error(CompileError::type_mismatch(
-                        typed_left.typ.clone(),
-                        typed_right.typ.clone(),
-                        typed_left.span,
-                        typed_right.span,
-                        format!("{:?}", node.op),
-                        MismatchKind::Binary,
-                    ));
-                    typ = TypeKind::Unknown;
+        if typed_left.typ != TypeKind::Unknown && typed_right.typ != TypeKind::Unknown {
+            match &node.op {
+                BinaryOperator::Add
+                | BinaryOperator::Sub
+                | BinaryOperator::Mul
+                | BinaryOperator::Div => {
+                    if typed_left.typ.is_numeric() && typed_left.typ == typed_right.typ {
+                        typ = typed_left.typ.clone();
+                    } else {
+                        self.diagnose.push_error(expected_error);
+                    }
                 }
-            } else {
-                if typed_left.typ != typed_right.typ {
-                    self.diagnose.push_error(CompileError::type_mismatch(
-                        typed_left.typ.clone(),
-                        typed_right.typ.clone(),
-                        typed_left.span,
-                        typed_right.span,
-                        format!("{:?}", node.op),
-                        MismatchKind::Binary,
-                    ));
-                    typ = TypeKind::Unknown;
+                BinaryOperator::Percent => {
+                    if typed_left.typ == TypeKind::Int && typed_right.typ == TypeKind::Int {
+                        typ = TypeKind::Int
+                    } else {
+                        self.diagnose.push_error(expected_error);
+                    }
+                }
+                BinaryOperator::Greater
+                | BinaryOperator::Less
+                | BinaryOperator::GreaterEquals
+                | BinaryOperator::LessEquals => {
+                    if typed_left.typ.is_numeric() && typed_left.typ == typed_right.typ {
+                        typ = TypeKind::Bool;
+                    } else {
+                        self.diagnose.push_error(expected_error);
+                    }
+                }
+                BinaryOperator::And | BinaryOperator::Or => {
+                    if typed_left.typ == TypeKind::Bool && typed_right.typ == TypeKind::Bool {
+                        typ = TypeKind::Bool;
+                    } else {
+                        self.diagnose.push_error(expected_error);
+                    }
+                }
+                BinaryOperator::IsEquals | BinaryOperator::IsNotEquals => {
+                    if typed_left.typ == typed_right.typ {
+                        typ = TypeKind::Bool;
+                    } else {
+                        self.diagnose.push_error(expected_error);
+                    }
                 }
             }
         }
@@ -961,6 +977,10 @@ impl<'a> TypeChecker<'a> {
         if node.op == BinaryOperator::Div {
             if let TypedExpressionKind::Literal(lit) = &typed_right.kind {
                 if let LiteralValue::Number(0) = lit.value {
+                    self.diagnose
+                        .push_error(CompileError::divide_by_zero(node.span));
+                    typ = TypeKind::Unknown
+                } else if let LiteralValue::FloatNumber(0.0) = lit.value {
                     self.diagnose
                         .push_error(CompileError::divide_by_zero(node.span));
                     typ = TypeKind::Unknown
@@ -1033,6 +1053,7 @@ impl<'a> TypeChecker<'a> {
             LiteralValue::Number(_) => TypeKind::Int,
             LiteralValue::Char(_) => TypeKind::Char,
             LiteralValue::Bool(_) => TypeKind::Bool,
+            LiteralValue::FloatNumber(_) => TypeKind::Float,
         };
         TypedExpression {
             kind: TypedExpressionKind::Literal(LiteralNode {
