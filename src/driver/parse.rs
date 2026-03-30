@@ -1,11 +1,11 @@
 #![allow(unused)]
-use std::fmt;
+use std::fmt::{self, Pointer};
 
 use crate::{
     compile_error::CompileError,
     diagnostic::Diagnostics,
     driver::lex::{
-        LiteralKind::*,
+        LiteralKind::{self, *},
         Token,
         TokenKind::{self, *},
     },
@@ -81,7 +81,7 @@ impl<'a> Parser<'a> {
         match self.peek().kind {
             Val | Var => Some(self.parse_val()),
             Fun => Some(self.parse_fun()),
-            Extern => Some(self.parse_extern_fun()),
+            Extern => Some(self.parse_extern()),
             If => Some(self.parse_if()),
             While => Some(self.parse_while()),
             OpenBrace => Some(self.parse_block()),
@@ -102,6 +102,174 @@ impl<'a> Parser<'a> {
                 ));
                 self.consume_quietly();
                 Some(self.sync())
+            }
+        }
+    }
+
+    fn parse_extern_signature(&mut self) -> Result<ExternSignatureNode, Span> {
+        let fun_token = self.consume();
+
+        let name_token = match self.consume() {
+            t if matches!(t.kind, Ident(_)) => t,
+            found => {
+                let err = CompileError::unexpected_token(
+                    Ident("".to_string()),
+                    found.kind.clone(),
+                    found.span,
+                );
+                self.diagnose.push_error(err);
+                return Err(self.sync_span());
+            }
+        };
+
+        let name_str = if let Ident(s) = &name_token.kind {
+            s.clone()
+        } else {
+            String::new()
+        };
+        let name_node = IdentLiteralNode {
+            value: name_str,
+            span: name_token.span,
+        };
+
+        if let Err(broken) = self.expect(OpenParam) {
+            return Err(broken);
+        }
+
+        let mut is_variadic = false;
+        let mut parameters = Vec::new();
+        while !matches!(self.peek().kind, CloseParam | Eof) {
+            if let DotDot = self.peek().kind {
+                self.consume_quietly();
+                is_variadic = true;
+                break;
+            }
+            let p_name_token = match self.consume() {
+                t if matches!(t.kind, Ident(_)) => t,
+                found => {
+                    let err = CompileError::unexpected_token(
+                        Ident("param_name".to_string()),
+                        found.kind.clone(),
+                        found.span,
+                    );
+                    self.diagnose.push_error(err);
+                    return Err(self.sync_span());
+                }
+            };
+            let p_name_str = if let Ident(s) = &p_name_token.kind {
+                s.clone()
+            } else {
+                String::new()
+            };
+            let p_name_node = IdentLiteralNode {
+                value: p_name_str,
+                span: p_name_token.span,
+            };
+
+            let p_type_node = match self.parse_type() {
+                Ok(typ) => typ,
+                Err(Statement::Broken(span)) => return Err(span),
+                Err(_) => unreachable!(),
+            };
+
+            parameters.push((p_name_node, p_type_node));
+
+            if matches!(self.peek().kind, Comma) {
+                self.consume_quietly();
+            }
+        }
+
+        if let Err(broken) = self.expect(CloseParam) {
+            return Err(broken);
+        }
+
+        let type_node = match self.parse_type() {
+            Ok(typ) => typ,
+            Err(Statement::Broken(span)) => return Err(span),
+            Err(_) => unreachable!(),
+        };
+
+        if let Err(broken) = self.expect(Semi) {
+            return Err(broken);
+        }
+
+        Ok(ExternSignatureNode {
+            span: Span {
+                start: fun_token.span.start,
+                end: type_node.span().end,
+            },
+            name: name_node,
+            params: parameters,
+            is_variadic,
+            ret_type: type_node,
+        })
+    }
+
+    fn parse_extern_block(&mut self) -> Statement {
+        let extern_token = self.consume();
+        let header_token = self.consume(); // controlled by parse_extern()
+
+        let header_name =
+            if let TokenKind::Literal(LiteralKind::Str { val, .. }) = &header_token.kind {
+                val.clone()
+            } else {
+                String::new()
+            };
+
+        let block_start_token = match self.expect(OpenBrace) {
+            Ok(t) => t,
+            Err(broken) => return broken.into(),
+        };
+
+        let mut signatures = Vec::new();
+        while !matches!(self.peek().kind, TokenKind::CloseBrace | TokenKind::Eof) {
+            let token = self.peek();
+            match &token.kind {
+                Fun => match self.parse_extern_signature() {
+                    Ok(sign) => signatures.push(sign),
+                    Err(broken) => return broken.into(),
+                },
+                _ => {
+                    self.diagnose.push_error(CompileError::unexpected_token(
+                        Fun,
+                        token.kind.clone(),
+                        token.span,
+                    ));
+                    self.sync();
+                }
+            }
+        }
+
+        let block_end_token = match self.expect(CloseBrace) {
+            Ok(t) => t,
+            Err(broken) => return broken.into(),
+        };
+
+        Statement::ExternBlock(ExternBlockNode {
+            header: header_name,
+            signatures,
+            span: Span::new(extern_token.span.start, block_end_token.span.end),
+        })
+    }
+
+    fn parse_extern(&mut self) -> Statement {
+        let peeked = self.peek_at(1);
+        match &peeked.kind {
+            Fun => self.parse_extern_fun(),
+            Literal(LiteralKind::Str {
+                terminated: true, ..
+            }) => self.parse_extern_block(),
+            Literal(LiteralKind::Str {
+                terminated: false, ..
+            }) => self.sync(),
+            _ => {
+                let err = CompileError::unexpected_token(
+                    Ident("fun or literal-str".to_string()),
+                    peeked.kind.clone(),
+                    peeked.span,
+                );
+                self.diagnose.push_error(err);
+                self.sync()
             }
         }
     }
@@ -206,18 +374,7 @@ impl<'a> Parser<'a> {
     // extern fun ident( i int, i2 int );
     fn parse_extern_fun(&mut self) -> Statement {
         let extern_token = self.consume();
-        let fun_token = match self.consume() {
-            t if matches!(t.kind, Fun) => t,
-            found => {
-                let err = CompileError::unexpected_token(
-                    Ident("".to_string()),
-                    found.kind.clone(),
-                    found.span,
-                );
-                self.diagnose.push_error(err);
-                return self.sync();
-            }
-        };
+        let fun_token = self.consume(); // controlled by parse_extern()
 
         let name_token = match self.consume() {
             t if matches!(t.kind, Ident(_)) => t,
@@ -915,6 +1072,7 @@ pub(crate) enum Statement {
     Block(BlockNode),
     Expression(Expression),
     ExpressionStatement(Expression),
+    ExternBlock(ExternBlockNode),
     Return(ReturnNode),
     Broken(Span),
 }
@@ -936,6 +1094,7 @@ impl fmt::Debug for Statement {
             Self::Block(n) => n.fmt(f),
             Self::Expression(n) => n.fmt(f),
             Self::ExpressionStatement(n) => n.fmt(f),
+            Self::ExternBlock(n) => n.fmt(f),
             Self::Return(n) => n.fmt(f),
             Self::Broken(span) => write!(
                 f,
@@ -1420,6 +1579,22 @@ pub(crate) struct AddressOfNode {
 #[derive(Debug)]
 pub(crate) struct DerefNode {
     pub inner: Box<Expression>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct ExternBlockNode {
+    pub header: String,
+    pub signatures: Vec<ExternSignatureNode>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct ExternSignatureNode {
+    pub name: IdentLiteralNode,
+    pub params: Vec<(IdentLiteralNode, TypeNode)>,
+    pub is_variadic: bool,
+    pub ret_type: TypeNode,
     pub span: Span,
 }
 

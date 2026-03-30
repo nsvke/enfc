@@ -6,9 +6,9 @@ use crate::driver::{
     typecheck::{
         IdentLiteralTuple, TypedAddressOfNode, TypedAssignmentNode, TypedBinaryExpressionNode,
         TypedBlockNode, TypedCallNode, TypedDerefNode, TypedExpression, TypedExpressionKind,
-        TypedFieldAccessNode, TypedFunDefNode, TypedIfNode, TypedIndexExpressionNode,
-        TypedReturnNode, TypedStatement, TypedStatementKind, TypedUnaryExpressionNode,
-        TypedVarDecNode, TypedWhileNode,
+        TypedExternBlockNode, TypedFieldAccessNode, TypedFunDefNode, TypedIfNode,
+        TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
+        TypedUnaryExpressionNode, TypedVarDecNode, TypedWhileNode,
     },
 };
 
@@ -68,6 +68,7 @@ pub(crate) struct IrGenerator {
     instructions: Vec<Instruction>,
     str_pool: Pool,
     fun_pool: Pool,
+    included_headers: Vec<String>,
 }
 
 impl IrGenerator {
@@ -76,6 +77,7 @@ impl IrGenerator {
             instructions: Vec::new(),
             str_pool: Pool::new(),
             fun_pool: Pool::new(),
+            included_headers: Vec::new(),
         }
     }
 
@@ -87,6 +89,7 @@ impl IrGenerator {
             instructions: self.instructions,
             str_pool: self.str_pool,
             fun_pool: self.fun_pool,
+            included_headers: self.included_headers,
         }
     }
 
@@ -242,6 +245,12 @@ impl IrGenerator {
         ));
     }
 
+    fn gen_from_stmt_extern_block(&mut self, node: &TypedExternBlockNode) {
+        if !self.included_headers.contains(&node.header) {
+            self.included_headers.push(node.header.clone());
+        }
+    }
+
     fn gen_from_stmt(&mut self, stmt: &TypedStatement) {
         match &stmt.kind {
             TypedStatementKind::VarDeclaration(node) => self.gen_from_stmt_val(node),
@@ -250,6 +259,7 @@ impl IrGenerator {
             TypedStatementKind::While(node) => self.gen_from_stmt_while(node),
             TypedStatementKind::FunDefinition(node) => self.gen_from_stmt_fun(node),
             TypedStatementKind::Block(node) => self.gen_from_stmt_block(node),
+            TypedStatementKind::ExternBlock(node) => self.gen_from_stmt_extern_block(node),
             TypedStatementKind::Expression(expr) => self.gen_from_expr(expr),
             TypedStatementKind::ExpressionStatement(expr) => self.gen_from_expr_stmt(expr),
             TypedStatementKind::Return(node) => self.gen_from_stmt_return(node),
@@ -449,6 +459,7 @@ pub struct IrProgram {
     instructions: Vec<Instruction>,
     str_pool: Pool,
     fun_pool: Pool,
+    included_headers: Vec<String>,
 }
 impl IrProgram {
     pub fn get_str(&self, id: usize) -> &str {
@@ -461,6 +472,9 @@ impl IrProgram {
 
     pub fn instructions(&self) -> &[Instruction] {
         &self.instructions
+    }
+    pub fn included_headers(&self) -> &[String] {
+        &self.included_headers
     }
 }
 

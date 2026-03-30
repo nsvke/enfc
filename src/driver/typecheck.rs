@@ -4,7 +4,7 @@ use crate::compile_error::{CompileError, MismatchKind, SymbolKind};
 use crate::diagnostic::Diagnostics;
 use crate::driver::parse::{
     AddressOfNode, AssignmentNode, BinaryExpressionNode, BinaryOperator, BlockNode, CallNode,
-    DerefNode, Expression, FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode,
+    DerefNode, Expression, ExternBlockNode, FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode,
     IndexExpressionNode, LiteralNode, LiteralValue, ReturnNode, Statement, TypeNode,
     UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
 };
@@ -47,6 +47,7 @@ pub enum TypeKind {
         params: Vec<Type>,
         ret: Box<Type>,
         is_extern: bool,
+        is_variadic: bool,
     },
     Reference(Box<TypeKind>),
     Unknown,
@@ -215,6 +216,7 @@ impl<'a> TypeChecker<'a> {
                                         params,
                                         ret: Box::new(ret_typ),
                                         is_extern,
+                                        is_variadic: false,
                                     },
                                 },
                                 span: node.span,
@@ -223,6 +225,43 @@ impl<'a> TypeChecker<'a> {
                             });
                         }
                     };
+                }
+                Statement::ExternBlock(node) => {
+                    for sign in &node.signatures {
+                        // TODO check redefinition first, resolve types later
+                        let params = sign
+                            .params
+                            .iter()
+                            .map(|(_, typ)| self.resolve_types(typ))
+                            .collect();
+                        let ret_typ = self.resolve_types(&sign.ret_type);
+                        match self.scopes[0].entry(sign.name.value.clone()) {
+                            Entry::Occupied(occupied_entry) => {
+                                self.diagnose.push_error(CompileError::symbol_redefinition(
+                                    sign.name.value.clone(),
+                                    occupied_entry.get().span, // TODO only function signature's span
+                                    sign.name.span,
+                                    SymbolKind::Function,
+                                ))
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(Symbol {
+                                    typ: Type {
+                                        span: node.span,
+                                        kind: TypeKind::Function {
+                                            params,
+                                            ret: Box::new(ret_typ),
+                                            is_extern: true,
+                                            is_variadic: sign.is_variadic,
+                                        },
+                                    },
+                                    span: node.span,
+                                    mutable: false,
+                                    id,
+                                });
+                            }
+                        };
+                    }
                 }
                 _ => {}
             };
@@ -238,6 +277,7 @@ impl<'a> TypeChecker<'a> {
                             params,
                             ret,
                             is_extern,
+                            is_variadic: false,
                         } => {
                             if params.len() != 0 || ret.kind != TypeKind::Nret || *is_extern {
                                 self.diagnose.push_error(CompileError::wrong_main(loc));
@@ -656,6 +696,44 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn check_stmt_extern(&mut self, node: &ExternBlockNode) -> TypedStatement {
+        let mut signatures = Vec::new();
+        for sign in &node.signatures {
+            let name = IdentLiteralTuple {
+                val: sign.name.value.clone(),
+                id: self.give_ident_id(),
+            };
+
+            let ret_type = self.resolve_types(&sign.ret_type);
+
+            let mut params = Vec::new();
+            for param in &sign.params {
+                let param_name = IdentLiteralTuple {
+                    val: param.0.value.clone(),
+                    id: self.give_ident_id(),
+                };
+                let typ = self.resolve_types(&param.1);
+                params.push((param_name, typ));
+            }
+
+            signatures.push(TypedExternSignatureNode {
+                name,
+                params,
+                is_variadic: sign.is_variadic,
+                ret_type,
+            });
+        }
+
+        TypedStatement {
+            kind: TypedStatementKind::ExternBlock(TypedExternBlockNode {
+                header: node.header.clone(),
+                signatures,
+            }),
+            span: node.span,
+            terminates: false,
+        }
+    }
+
     fn check_stmt(&mut self, stmt: &Statement) -> TypedStatement {
         match stmt {
             Statement::VarDeclaration(node) => self.check_stmt_val(node),
@@ -680,6 +758,7 @@ impl<'a> TypeChecker<'a> {
                     terminates: false,
                 }
             }
+            Statement::ExternBlock(node) => self.check_stmt_extern(node),
             Statement::Return(node) => self.check_stmt_ret(node),
             Statement::Broken(span) => self.broken_typed_stmt(*span),
         }
@@ -731,15 +810,26 @@ impl<'a> TypeChecker<'a> {
                     params,
                     ret,
                     is_extern,
+                    is_variadic,
                 } => {
                     is_extern_1 = *is_extern;
 
-                    if node.arguments.len() != params.len() {
-                        self.diagnose.push_error(CompileError::missing_argument(
-                            params.len(),
-                            node.arguments.len(),
-                            typed_primary.span,
-                        ));
+                    if *is_variadic {
+                        if node.arguments.len() < params.len() {
+                            self.diagnose.push_error(CompileError::missing_argument(
+                                params.len(),
+                                node.arguments.len(),
+                                typed_primary.span,
+                            ));
+                        }
+                    } else {
+                        if node.arguments.len() != params.len() {
+                            self.diagnose.push_error(CompileError::missing_argument(
+                                params.len(),
+                                node.arguments.len(),
+                                typed_primary.span,
+                            ));
+                        }
                     }
 
                     for (i, arg_expr) in node.arguments.iter().enumerate() {
@@ -1003,6 +1093,7 @@ pub(crate) enum TypedStatementKind {
     Block(TypedBlockNode),
     Expression(TypedExpression),
     ExpressionStatement(TypedExpression),
+    ExternBlock(TypedExternBlockNode),
     Return(TypedReturnNode),
     Broken,
 }
@@ -1124,4 +1215,18 @@ pub(crate) struct IdentLiteralIdNode {
 pub(crate) struct IdentLiteralTuple {
     pub val: String,
     pub id: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct TypedExternBlockNode {
+    pub header: String,
+    pub signatures: Vec<TypedExternSignatureNode>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TypedExternSignatureNode {
+    pub name: IdentLiteralTuple,
+    pub params: Vec<(IdentLiteralTuple, Type)>,
+    pub is_variadic: bool,
+    pub ret_type: Type,
 }

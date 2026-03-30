@@ -29,6 +29,8 @@ pub(crate) struct CCodeGen<'a> {
     stack: Vec<String>,
     output: String,
     current_params: Vec<String>,
+    current_fun_sign: String,
+    fun_signs: Vec<String>,
 }
 
 impl<'a> CCodeGen<'a> {
@@ -38,9 +40,13 @@ impl<'a> CCodeGen<'a> {
             stack: Vec::new(),
             output: String::new(),
             current_params: Vec::new(),
+            current_fun_sign: String::new(),
+            fun_signs: Vec::new(),
         }
     }
     fn run(mut self) -> Self {
+        let mut output = String::new();
+
         let mut jump_targets = HashSet::new();
         for instr in self.ir.instructions() {
             match instr {
@@ -51,14 +57,9 @@ impl<'a> CCodeGen<'a> {
             }
         }
 
-        self.output.push_str("#include <stdio.h>\n");
-        self.output.push_str("#include <stdint.h>\n");
-        self.output.push_str("#include <stdbool.h>\n");
-
         for (index, instr) in self.ir.instructions().iter().enumerate() {
             if jump_targets.contains(&index) {
-                self.output
-                    .push_str(&format!("instr_index_{}: // -> {:?}\n", index, instr));
+                output.push_str(&format!("instr_index_{}: // -> {:?}\n", index, instr));
             }
 
             match instr {
@@ -80,16 +81,11 @@ impl<'a> CCodeGen<'a> {
                 }
                 Instruction::Store(id) => {
                     let r = self.stack_pop();
-                    self.output.push_str(&format!("enf_var_{} = {};\n", *id, r));
+                    output.push_str(&format!("enf_var_{} = {};\n", *id, r));
                 }
                 Instruction::Init(id, typ) => {
                     let r = self.stack_pop();
-                    self.output.push_str(&format!(
-                        "{} enf_var_{} = {};\n",
-                        typ.as_c_type(),
-                        *id,
-                        r
-                    ));
+                    output.push_str(&format!("{} enf_var_{} = {};\n", typ.as_c_type(), *id, r));
                 }
                 Instruction::AddressOf(id) => {
                     self.stack.push(format!("&enf_var_{}", id));
@@ -101,7 +97,7 @@ impl<'a> CCodeGen<'a> {
                 Instruction::StoreIndirect => {
                     let addr = self.stack_pop();
                     let val = self.stack_pop();
-                    self.output.push_str(&format!("*({}) = {};\n", addr, val));
+                    output.push_str(&format!("*({}) = {};\n", addr, val));
                 }
                 Instruction::Add => {
                     let (l, r) = self.stack_pop_binary();
@@ -144,13 +140,11 @@ impl<'a> CCodeGen<'a> {
                     self.stack.push(format!("(!({}))", o));
                 }
                 Instruction::Jump(index) => {
-                    self.output
-                        .push_str(&format!("goto instr_index_{};\n", index));
+                    output.push_str(&format!("goto instr_index_{};\n", index));
                 }
                 Instruction::JumpIfFalse(index) => {
                     let cond = self.stack_pop();
-                    self.output
-                        .push_str(&format!("if (!({})) goto instr_index_{};\n", cond, index));
+                    output.push_str(&format!("if (!({})) goto instr_index_{};\n", cond, index));
                 }
                 Instruction::Call(id, len) => {
                     self.current_params.clear();
@@ -178,21 +172,37 @@ impl<'a> CCodeGen<'a> {
                 }
                 Instruction::ExternFunStart(id, typ) => {
                     let name = self.ir.get_fun_name(*id);
-                    self.output
+                    output.push_str(&format!("{} {}(", typ.as_c_type(), name));
+
+                    self.current_fun_sign
                         .push_str(&format!("{} {}(", typ.as_c_type(), name));
+
                     self.current_params.clear();
                 }
                 Instruction::ExternFunParam(id, typ) => {
                     self.current_params.push(typ.as_c_type()); // TODO no name mangle for extern fun params
                 }
                 Instruction::ExternFunEnd => {
-                    self.output.push_str(&self.current_params.join(", "));
-                    self.output.push_str(");\n");
+                    let params = self.current_params.join(", ");
+                    output.push_str(&params);
+                    output.push_str(");\n");
+
+                    self.current_fun_sign.push_str(&params);
+                    self.current_fun_sign.push_str(");\n");
+
+                    self.fun_signs.push(self.current_fun_sign.clone());
+                    self.current_fun_sign.clear();
                 }
                 Instruction::FunStart(id, typ) => {
                     let name = self.ir.get_fun_name(*id);
-                    self.output
-                        .push_str(&format!("{} enf_fun_{}(", typ.as_c_type(), name));
+                    output.push_str(&format!("{} enf_fun_{}(", typ.as_c_type(), name));
+
+                    self.current_fun_sign.push_str(&format!(
+                        "{} enf_fun_{}(",
+                        typ.as_c_type(),
+                        name
+                    ));
+
                     self.current_params.clear();
                 }
                 Instruction::FunParam(id, typ) => {
@@ -200,30 +210,58 @@ impl<'a> CCodeGen<'a> {
                         .push(format!("{} enf_var_{}", typ.as_c_type(), *id));
                 }
                 Instruction::FunBodyStart => {
-                    self.output.push_str(&self.current_params.join(", "));
-                    self.output.push_str(") {\n");
+                    let params = self.current_params.join(", ");
+                    output.push_str(&params);
+                    output.push_str(") {\n");
+
+                    self.current_fun_sign.push_str(&params);
+                    self.current_fun_sign.push_str(");\n");
+
+                    self.fun_signs.push(self.current_fun_sign.clone());
+                    self.current_fun_sign.clear();
                 }
                 Instruction::FunEnd => {
-                    self.output.push_str("}\n");
+                    output.push_str("}\n");
                 }
                 Instruction::Discard => {
                     let val = self.stack_pop();
-                    self.output.push_str(&format!("{};\n", val));
+                    output.push_str(&format!("{};\n", val));
                 }
                 Instruction::Ret(has_value) => {
                     if *has_value {
                         let val = self.stack_pop();
-                        self.output.push_str(&format!("return {};\n", val));
+                        output.push_str(&format!("return {};\n", val));
                     } else {
-                        self.output.push_str("return;\n");
+                        output.push_str("return;\n");
                     }
                 }
             }
         }
 
-        self.output
-            .push_str("int main() { enf_fun_main(); return 0; }");
+        output.push_str("int main() { enf_fun_main(); return 0; }");
+
+        let head = self.generate_head();
+
+        self.output.push_str(&head);
+        self.output.push_str(&output);
+
         self
+    }
+
+    fn generate_head(&mut self) -> String {
+        let mut head = String::new();
+        for included in self.ir.included_headers() {
+            head.push_str(&format!("#include<{}>\n", included));
+        }
+        head.push_str("#include <stdint.h>\n#include <stdbool.h>\n");
+
+        for fun in &self.fun_signs {
+            head.push_str(fun);
+        }
+
+        head.push('\n');
+
+        head
     }
 
     fn stack_pop_binary(&mut self) -> (String, String) {
