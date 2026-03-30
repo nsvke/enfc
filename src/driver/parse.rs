@@ -77,13 +77,31 @@ impl<'a> Parser<'a> {
         statements
     }
 
+    fn parse_brk(&mut self) -> Statement {
+        let brk_token = self.consume();
+        if let Err(broken) = self.expect(Semi) {
+            return broken.into();
+        };
+        Statement::Break(brk_token.span)
+    }
+
+    fn parse_cntn(&mut self) -> Statement {
+        let cntn_token = self.consume();
+        if let Err(broken) = self.expect(Semi) {
+            return broken.into();
+        };
+        Statement::Continue(cntn_token.span)
+    }
+
     fn parse_statement(&mut self) -> Option<Statement> {
         match self.peek().kind {
             Val | Var => Some(self.parse_val()),
             Fun => Some(self.parse_fun()),
             Extern => Some(self.parse_extern()),
+            Break => Some(self.parse_brk()),
+            Continue => Some(self.parse_cntn()),
             If => Some(self.parse_if()),
-            While => Some(self.parse_while()),
+            While => Some(self.parse_whl()),
             OpenBrace => Some(self.parse_block()),
             Ret => Some(self.parse_ret()),
             Ident(_) | Literal(_) | OpenParam | Bang | Minus | And | Star => {
@@ -566,7 +584,7 @@ impl<'a> Parser<'a> {
     }
 
     // whl $expr $block
-    fn parse_while(&mut self) -> Statement {
+    fn parse_whl(&mut self) -> Statement {
         let whl = self.consume();
         let expr = self.parse_expr();
         let body_stmt = self.parse_block();
@@ -1074,6 +1092,8 @@ pub(crate) enum Statement {
     ExpressionStatement(Expression),
     ExternBlock(ExternBlockNode),
     Return(ReturnNode),
+    Break(Span),
+    Continue(Span),
     Broken(Span),
 }
 
@@ -1096,6 +1116,8 @@ impl fmt::Debug for Statement {
             Self::ExpressionStatement(n) => n.fmt(f),
             Self::ExternBlock(n) => n.fmt(f),
             Self::Return(n) => n.fmt(f),
+            Self::Break(n) => n.fmt(f),
+            Self::Continue(n) => n.fmt(f),
             Self::Broken(span) => write!(
                 f,
                 "\x1b[38;2;255;170;0m{}\x1b[90m..\x1b[38;2;255;170;0m{}\x1b[0m \x1b[31mBrokenStatement!\x1b[0m",

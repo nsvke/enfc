@@ -311,6 +311,12 @@ pub mod fmt_miette_impl {
                 CompileError::Semantic(SemanticError::CannotAddressable { .. }) => {
                     write!(f, "can not get address for this")
                 }
+                CompileError::Semantic(SemanticError::ContinueOutsideLoop { .. }) => {
+                    write!(f, "can not use continue outside loop")
+                }
+                CompileError::Semantic(SemanticError::BreakOutsideLoop { .. }) => {
+                    write!(f, "can not use break outside loop")
+                }
             }
         }
     }

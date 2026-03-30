@@ -69,6 +69,8 @@ pub(crate) struct IrGenerator {
     str_pool: Pool,
     fun_pool: Pool,
     included_headers: Vec<String>,
+    waiting_brks: Vec<Vec<usize>>,
+    waiting_cntns: Vec<Vec<usize>>,
 }
 
 impl IrGenerator {
@@ -78,6 +80,8 @@ impl IrGenerator {
             str_pool: Pool::new(),
             fun_pool: Pool::new(),
             included_headers: Vec::new(),
+            waiting_brks: Vec::new(),
+            waiting_cntns: Vec::new(),
         }
     }
 
@@ -131,6 +135,22 @@ impl IrGenerator {
                 }
                 Instruction::JumpIfFalse(index) => {
                     *index = curr;
+                }
+                _ => unreachable!("use for only jumpers"),
+            }
+        } else {
+            unreachable!("ir: instruction vector bound error")
+        }
+    }
+
+    fn patch_jump_to(&mut self, instr_index: usize, target_index: usize) {
+        if let Some(instr) = self.instructions.get_mut(instr_index) {
+            match instr {
+                Instruction::Jump(index) => {
+                    *index = target_index;
+                }
+                Instruction::JumpIfFalse(index) => {
+                    *index = target_index;
                 }
                 _ => unreachable!("use for only jumpers"),
             }
@@ -198,13 +218,27 @@ impl IrGenerator {
         }
     }
 
-    fn gen_from_stmt_while(&mut self, node: &TypedWhileNode) {
+    fn gen_from_stmt_whl(&mut self, node: &TypedWhileNode) {
+        self.waiting_brks.push(Vec::new());
+        self.waiting_cntns.push(Vec::new());
+
         let start_index = self.current_index();
         self.gen_from_expr(&node.condition);
         let jmp_fls_instr_index = self.emit_with_index(Instruction::JumpIfFalse(0));
         self.gen_from_stmt_block(&node.body);
         self.emit(Instruction::Jump(start_index));
         self.add_jmp_index_here(jmp_fls_instr_index);
+
+        if let Some(brks) = self.waiting_brks.pop() {
+            for brk_instr_index in brks {
+                self.add_jmp_index_here(brk_instr_index);
+            }
+        }
+        if let Some(cntns) = self.waiting_cntns.pop() {
+            for cntn_instr_index in cntns {
+                self.patch_jump_to(cntn_instr_index, start_index);
+            }
+        }
     }
 
     fn gen_from_stmt_block(&mut self, node: &TypedBlockNode) {
@@ -251,18 +285,37 @@ impl IrGenerator {
         }
     }
 
+    fn gen_from_stmt_brk(&mut self) {
+        let instr_index = self.emit_with_index(Instruction::Jump(0));
+        if let Some(brks) = self.waiting_brks.last_mut() {
+            brks.push(instr_index);
+        } else {
+            unreachable!("break used outside loop");
+        }
+    }
+    fn gen_from_stmt_cntn(&mut self) {
+        let instr_index = self.emit_with_index(Instruction::Jump(0));
+        if let Some(cntns) = self.waiting_cntns.last_mut() {
+            cntns.push(instr_index);
+        } else {
+            unreachable!("continue used outside loop");
+        }
+    }
+
     fn gen_from_stmt(&mut self, stmt: &TypedStatement) {
         match &stmt.kind {
             TypedStatementKind::VarDeclaration(node) => self.gen_from_stmt_val(node),
             TypedStatementKind::Assignment(node) => self.gen_from_stmt_asgn(node),
             TypedStatementKind::If(node) => self.gen_from_stmt_if(node),
-            TypedStatementKind::While(node) => self.gen_from_stmt_while(node),
+            TypedStatementKind::While(node) => self.gen_from_stmt_whl(node),
             TypedStatementKind::FunDefinition(node) => self.gen_from_stmt_fun(node),
             TypedStatementKind::Block(node) => self.gen_from_stmt_block(node),
             TypedStatementKind::ExternBlock(node) => self.gen_from_stmt_extern_block(node),
             TypedStatementKind::Expression(expr) => self.gen_from_expr(expr),
             TypedStatementKind::ExpressionStatement(expr) => self.gen_from_expr_stmt(expr),
             TypedStatementKind::Return(node) => self.gen_from_stmt_return(node),
+            TypedStatementKind::Break => self.gen_from_stmt_brk(),
+            TypedStatementKind::Continue => self.gen_from_stmt_cntn(),
             TypedStatementKind::Broken => {
                 unreachable!("hey typechecker, what the hell is this doing here?")
             }

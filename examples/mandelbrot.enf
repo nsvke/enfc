@@ -1,0 +1,50 @@
+extern "stdio.h" {
+    fun putchar(c int) int;
+}
+
+fun main() nret {
+    var scale = 10000;
+    var max_iter = 30;
+
+    var y = -12000;
+    whl y <= 12000 {
+
+        var x = -20000;
+        whl x <= 5000 {
+
+            var zx = 0;
+            var zy = 0;
+            var zx2 = 0;
+            var zy2 = 0;
+            var iter = 0;
+            var escaped = 0;
+
+            whl iter < max_iter {
+                zx2 = (zx * zx) / scale;
+                zy2 = (zy * zy) / scale;
+
+                if (zx2 + zy2) > 40000 {
+                    escaped = 1;
+                    iter = max_iter; -- for break -- break not supported yet
+                } else {
+                    var tmp = zx2 - zy2 + x;
+                    zy = (2 * zx * zy) / scale + y;
+                    zx = tmp;
+                    iter = iter + 1;
+                }
+            }
+
+            if escaped == 0 {
+                putchar(42); -- 42 = '*'
+            } else {
+                putchar(32); -- 32 = ' '
+            }
+
+            x = x + 350;
+        }
+
+        putchar(10); -- 10 = '\n'
+
+        y = y + 550;
+    }
+}

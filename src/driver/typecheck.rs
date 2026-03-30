@@ -87,6 +87,7 @@ pub(crate) struct TypeChecker<'a> {
     expected_return: Option<(TypeKind, Span)>,
     next_ident_id: usize,
     main_loc: Option<Span>,
+    loop_depth: usize,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -97,6 +98,7 @@ impl<'a> TypeChecker<'a> {
             expected_return: None,
             next_ident_id: 1,
             main_loc: None,
+            loop_depth: 0,
         };
         // new_type_checker.init();
         new_type_checker
@@ -479,7 +481,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_stmt_while(&mut self, node: &WhileNode) -> TypedStatement {
+    fn check_stmt_whl(&mut self, node: &WhileNode) -> TypedStatement {
         let typed_condition = self.check_expr(&node.condition);
 
         if typed_condition.typ != TypeKind::Bool && typed_condition.typ != TypeKind::Unknown {
@@ -490,7 +492,9 @@ impl<'a> TypeChecker<'a> {
             ));
         }
 
+        self.loop_depth += 1;
         let typed_body = self.check_stmt_block(&node.body).into_block_node();
+        self.loop_depth -= 1;
 
         TypedStatement {
             kind: TypedStatementKind::While(TypedWhileNode {
@@ -734,12 +738,35 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn check_stmt_brk(&mut self, span: Span) -> TypedStatement {
+        if self.loop_depth == 0 {
+            self.diagnose
+                .push_error(CompileError::break_outside_loop(span));
+        }
+        TypedStatement {
+            kind: TypedStatementKind::Break,
+            span,
+            terminates: true,
+        }
+    }
+    fn check_stmt_cntn(&mut self, span: Span) -> TypedStatement {
+        if self.loop_depth == 0 {
+            self.diagnose
+                .push_error(CompileError::continue_outside_loop(span));
+        }
+        TypedStatement {
+            kind: TypedStatementKind::Continue,
+            span,
+            terminates: true,
+        }
+    }
+
     fn check_stmt(&mut self, stmt: &Statement) -> TypedStatement {
         match stmt {
             Statement::VarDeclaration(node) => self.check_stmt_val(node),
             Statement::Assignment(node) => self.check_stmt_asgn(node),
             Statement::If(node) => self.check_stmt_if(node),
-            Statement::While(node) => self.check_stmt_while(node),
+            Statement::While(node) => self.check_stmt_whl(node),
             Statement::FunDefinition(node) => self.check_stmt_fun(node),
             Statement::Block(node) => self.check_stmt_block(node),
             Statement::Expression(expr) => {
@@ -760,6 +787,8 @@ impl<'a> TypeChecker<'a> {
             }
             Statement::ExternBlock(node) => self.check_stmt_extern(node),
             Statement::Return(node) => self.check_stmt_ret(node),
+            Statement::Break(span) => self.check_stmt_brk(*span),
+            Statement::Continue(span) => self.check_stmt_cntn(*span),
             Statement::Broken(span) => self.broken_typed_stmt(*span),
         }
     }
@@ -1095,6 +1124,8 @@ pub(crate) enum TypedStatementKind {
     ExpressionStatement(TypedExpression),
     ExternBlock(TypedExternBlockNode),
     Return(TypedReturnNode),
+    Break,
+    Continue,
     Broken,
 }
 

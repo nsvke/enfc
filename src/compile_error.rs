@@ -88,6 +88,12 @@ pub enum SemanticError {
     CannotAddressable {
         span: Span,
     },
+    BreakOutsideLoop {
+        span: Span,
+    },
+    ContinueOutsideLoop {
+        span: Span,
+    },
 }
 #[derive(Debug)]
 pub enum SymbolKind {
@@ -221,6 +227,12 @@ impl CompileError {
     pub fn cannot_addressable(span: Span) -> Self {
         CompileError::Semantic(SemanticError::CannotAddressable { span })
     }
+    pub fn break_outside_loop(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::BreakOutsideLoop { span })
+    }
+    pub fn continue_outside_loop(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::ContinueOutsideLoop { span })
+    }
 }
 
 pub trait ErrorFormatter {
@@ -254,6 +266,8 @@ impl CompileError {
             Self::Semantic(SemanticError::InvalidLValue { span }) => *span,
             Self::Semantic(SemanticError::CannotDeref { span, .. }) => *span,
             Self::Semantic(SemanticError::CannotAddressable { span }) => *span,
+            Self::Semantic(SemanticError::BreakOutsideLoop { span }) => *span,
+            Self::Semantic(SemanticError::ContinueOutsideLoop { span }) => *span,
         }
     }
 }
