@@ -9,6 +9,7 @@ use crate::driver::{
 
 trait AsCType {
     fn as_c_type(&self) -> String;
+    fn as_c_array_format(&self) -> (String, String);
 }
 
 impl AsCType for IrType {
@@ -21,6 +22,18 @@ impl AsCType for IrType {
             IrType::Str => "const char*".into(),
             IrType::Void => "void".into(),
             IrType::Reference(inner_type) => format!("{}*", inner_type.as_c_type()),
+            IrType::Array(inner_type, _) => {
+                format!("{}*", inner_type.as_c_type())
+            }
+        }
+    }
+    fn as_c_array_format(&self) -> (String, String) {
+        match self {
+            Self::Array(inner, size) => {
+                let (base, dims) = inner.as_c_array_format();
+                (base, format!("[{}]{}", size, dims))
+            }
+            _ => (self.as_c_type(), String::new()),
         }
     }
 }
@@ -31,6 +44,7 @@ pub(crate) struct CCodeGen<'a> {
     output: String,
     current_params: Vec<String>,
     current_fun_sign: String,
+    current_array: Vec<String>,
     fun_signs: Vec<String>,
 }
 
@@ -42,6 +56,7 @@ impl<'a> CCodeGen<'a> {
             output: String::new(),
             current_params: Vec::new(),
             current_fun_sign: String::new(),
+            current_array: Vec::new(),
             fun_signs: Vec::new(),
         }
     }
@@ -72,14 +87,39 @@ impl<'a> CCodeGen<'a> {
                     let s = self.ir.get_str(*id);
                     self.stack.push(format!("\"{}\"", s));
                 }
-                Instruction::Load(id) => self.stack.push(format!("enf_var_{}", id)),
-                Instruction::Store(id) => {
+                Instruction::PushValueId(id) => self.stack.push(id.to_string()),
+                Instruction::Load => {
+                    let x_id = self.stack_pop();
+                    self.stack.push(format!("enf_var_{}", x_id));
+                }
+                Instruction::Store => {
+                    let name = self.stack_pop();
                     let r = self.stack_pop();
-                    output.push_str(&format!("enf_var_{} = {};\n", *id, r));
+                    output.push_str(&format!("{} = {};\n", name, r));
                 }
                 Instruction::Init(id, typ) => {
                     let r = self.stack_pop();
-                    output.push_str(&format!("{} enf_var_{} = {};\n", typ.as_c_type(), *id, r));
+
+                    match &typ {
+                        IrType::Array(_, _) => {
+                            let (base_type, dimensions) = typ.as_c_array_format();
+                            if r.starts_with('{') {
+                                output.push_str(&format!(
+                                    "{} enf_var_{}{} = {};\n",
+                                    base_type, id, dimensions, r
+                                ));
+                            } else {
+                                output
+                                    .push_str(&format!("{}* enf_var_{} = {};\n", base_type, id, r));
+                            }
+                        }
+                        _ => output.push_str(&format!(
+                            "{} enf_var_{} = {};\n",
+                            typ.as_c_type(),
+                            *id,
+                            r
+                        )),
+                    }
                 }
                 Instruction::AddressOf(id) => self.stack.push(format!("&enf_var_{}", id)),
                 Instruction::LoadIndirect => {
@@ -213,6 +253,25 @@ impl<'a> CCodeGen<'a> {
                     self.current_fun_sign.clear();
                 }
                 Instruction::FunEnd => output.push_str("}\n"),
+                Instruction::ArrayStart => self.current_array.push(String::from("{")),
+                Instruction::ArrayElem => {
+                    let elem = self.stack_pop();
+
+                    if let Some(curr_arr) = self.current_array.last_mut() {
+                        curr_arr.push_str(&format!("{},", elem));
+                    }
+                }
+                Instruction::ArrayEnd => {
+                    if let Some(mut completed_array) = self.current_array.pop() {
+                        completed_array.push('}');
+                        self.stack.push(completed_array);
+                    }
+                }
+                Instruction::IndexAccess => {
+                    let index = self.stack_pop();
+                    let target = self.stack_pop();
+                    self.stack.push(format!("{}[{}]", target, index));
+                }
                 Instruction::Discard => {
                     let val = self.stack_pop();
                     output.push_str(&format!("{};\n", val));

@@ -3,10 +3,10 @@
 use crate::compile_error::{CompileError, MismatchKind, SymbolKind};
 use crate::diagnostic::Diagnostics;
 use crate::driver::parse::{
-    AddressOfNode, AssignmentNode, BinaryExpressionNode, BinaryOperator, BlockNode, CallNode,
-    DerefNode, Expression, ExternBlockNode, FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode,
-    IndexExpressionNode, InjectNode, LiteralNode, LiteralValue, ReturnNode, Statement, TypeNode,
-    UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
+    AddressOfNode, ArrayLiteralNode, AssignmentNode, BinaryExpressionNode, BinaryOperator,
+    BlockNode, CallNode, DerefNode, Expression, ExternBlockNode, FieldAccessNode, FunDefNode,
+    IdentLiteralNode, IfNode, IndexExpressionNode, InjectNode, LiteralNode, LiteralValue,
+    ReturnNode, Statement, TypeNode, UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
 };
 use crate::structs::Span;
 use phf::{Map, phf_map};
@@ -51,12 +51,20 @@ pub enum TypeKind {
         is_variadic: bool,
     },
     Reference(Box<TypeKind>),
+    Array(Box<TypeKind>, usize),
     Unknown,
 }
 
 impl TypeKind {
     pub fn is_numeric(&self) -> bool {
         matches!(self, Self::Int | Self::Float)
+    }
+    pub fn is_unknown(&self) -> bool {
+        match &self {
+            Self::Unknown => true,
+            Self::Array(inner, _) if **inner == Self::Unknown => true,
+            _ => false,
+        }
     }
 }
 
@@ -74,6 +82,10 @@ impl std::fmt::Display for TypeKind {
             Self::Reference(inner) => {
                 let inn = format!("{}", inner);
                 write!(f, "&{}", inn)
+            }
+            Self::Array(inner, size) => {
+                let inn = format!("{}", inner);
+                write!(f, "[{}; {}]", inn, size)
             }
         }
     }
@@ -166,6 +178,10 @@ impl<'a> TypeChecker<'a> {
             TypeNode::Reference { inner, .. } => {
                 let inner_type = self.resolve_types(&inner);
                 TypeKind::Reference(Box::new(inner_type.kind))
+            }
+            TypeNode::Array { typ, size, .. } => {
+                let inner_type = self.resolve_types(&typ);
+                TypeKind::Array(Box::new(inner_type.kind), *size)
             }
         };
 
@@ -554,7 +570,7 @@ impl<'a> TypeChecker<'a> {
 
         match &self.expected_return {
             Some((expected_typ, loc_span)) => {
-                if typ != TypeKind::Unknown && *expected_typ != typ {
+                if !typ.is_unknown() && *expected_typ != typ {
                     let value_span = typed_value.as_ref().map(|v| v.span).unwrap_or(node.span);
 
                     self.diagnose.push_error(CompileError::type_mismatch(
@@ -580,27 +596,33 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_stmt_asgn(&mut self, node: &AssignmentNode) -> TypedStatement {
-        let typed_right = self.check_expr(&node.right);
-        let typed_left = self.check_expr(&node.left);
-
-        match &typed_left.kind {
+    fn check_lvalue_mutability(&mut self, expr: &TypedExpression) {
+        match &expr.kind {
             TypedExpressionKind::Ident(ident_node) => {
                 if let Some(sym) = self.resolve_symbol(&ident_node.val) {
                     if sym.mutable == false {
                         self.diagnose.push_error(CompileError::not_mutable(
                             ident_node.val.clone(),
-                            typed_left.span,
+                            expr.span,
                         ));
                     }
                 }
             }
             TypedExpressionKind::Deref(node) => {}
+            TypedExpressionKind::Index(node) => self.check_lvalue_mutability(&node.target),
             _ => self
                 .diagnose
-                .push_error(CompileError::invalid_l_value(typed_left.span)),
+                .push_error(CompileError::invalid_l_value(expr.span)),
         };
-        if typed_right.typ != TypeKind::Unknown && typed_left.typ != TypeKind::Unknown {
+    }
+
+    fn check_stmt_asgn(&mut self, node: &AssignmentNode) -> TypedStatement {
+        let typed_right = self.check_expr(&node.right);
+        let typed_left = self.check_expr(&node.left);
+
+        self.check_lvalue_mutability(&typed_left);
+
+        if !typed_right.typ.is_unknown() && !typed_left.typ.is_unknown() {
             if typed_left.typ != typed_right.typ {
                 self.diagnose.push_error(CompileError::type_mismatch(
                     typed_left.typ.clone(),
@@ -660,7 +682,7 @@ impl<'a> TypeChecker<'a> {
         } else {
             typ = self.resolve_types(&node.var_type);
 
-            if typ.kind != TypeKind::Unknown {
+            if !typ.kind.is_unknown() {
                 if typ.kind != typed_initalizer.typ {
                     self.diagnose.push_error(CompileError::type_mismatch(
                         typ.kind.clone(),
@@ -824,17 +846,40 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_expr_index(&mut self, node: &IndexExpressionNode) -> TypedExpression {
-        self.diagnose
-            .push_error(CompileError::feature_not_supported(
-                "IndexAccess".into(),
-                node.span,
-            ));
+        let typed_target = self.check_expr(&node.target);
+        let typed_index = self.check_expr(&node.index);
+
+        if !typed_index.typ.is_unknown() {
+            if typed_index.typ != TypeKind::Int {
+                self.diagnose.push_error(CompileError::unexpected_type(
+                    TypeKind::Int,
+                    typed_index.typ.clone(),
+                    typed_index.span,
+                ));
+            }
+        }
+
+        let mut typ = TypeKind::Unknown;
+        if !typed_target.typ.is_unknown() {
+            match &typed_target.typ {
+                TypeKind::Array(inner, _) => typ = *inner.clone(),
+                // pointer indexes is not supported yet
+                _ => {
+                    self.diagnose.push_error(CompileError::unexpected_type(
+                        TypeKind::Array(Box::new(TypeKind::Unknown), 0),
+                        typed_target.typ.clone(),
+                        typed_target.span,
+                    ));
+                }
+            }
+        }
+
         TypedExpression {
             kind: TypedExpressionKind::Index(TypedIndexExpressionNode {
-                target: Box::new(self.check_expr(&node.target)),
-                index: Box::new(self.check_expr(&node.index)),
+                target: Box::new(typed_target),
+                index: Box::new(typed_index),
             }),
-            typ: TypeKind::Unknown,
+            typ,
             span: node.span,
         }
     }
@@ -928,7 +973,7 @@ impl<'a> TypeChecker<'a> {
             MismatchKind::Binary,
         );
 
-        if typed_left.typ != TypeKind::Unknown && typed_right.typ != TypeKind::Unknown {
+        if !typed_left.typ.is_unknown() && !typed_right.typ.is_unknown() {
             match &node.op {
                 BinaryOperator::Add
                 | BinaryOperator::Sub
@@ -1108,6 +1153,40 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn check_expr_array_literal(&mut self, node: &ArrayLiteralNode) -> TypedExpression {
+        let mut typed_elems = Vec::new();
+        for elem in &node.elems {
+            let typed_elem = self.check_expr(elem);
+            typed_elems.push(typed_elem);
+        }
+
+        let typ = if let Some(elem) = typed_elems.first() {
+            elem.typ.clone()
+        } else {
+            TypeKind::Unknown
+        };
+
+        for typed_elem in &typed_elems {
+            if typ != typed_elem.typ {
+                self.diagnose.push_error(CompileError::type_mismatch(
+                    typ.clone(),
+                    typed_elem.typ.clone(),
+                    node.span, // TODO change with first elem span
+                    typed_elem.span,
+                    "array".into(),
+                    MismatchKind::Regular,
+                ));
+                break;
+            }
+        }
+
+        TypedExpression {
+            typ: TypeKind::Array(Box::new(typ), typed_elems.len()),
+            kind: TypedExpressionKind::ArrayLiteral(TypedArrayLiteralNode { elems: typed_elems }),
+            span: node.span,
+        }
+    }
+
     fn check_expr(&mut self, expr: &Expression) -> TypedExpression {
         match expr {
             Expression::Binary(node) => self.check_expr_binary(node),
@@ -1117,6 +1196,7 @@ impl<'a> TypeChecker<'a> {
             Expression::Call(node) => self.check_expr_call(node),
             Expression::AddressOf(node) => self.check_expr_addressof(node),
             Expression::Deref(node) => self.check_expr_deref(node),
+            Expression::ArrayLiteral(node) => self.check_expr_array_literal(node),
             Expression::Index(node) => self.check_expr_index(node),
             Expression::FieldAccess(node) => self.check_expr_field(node),
             Expression::Broken(span) => self.broken_typed_expr(*span),
@@ -1215,6 +1295,7 @@ pub(crate) enum TypedExpressionKind {
     Call(TypedCallNode),
     AddressOf(TypedAddressOfNode),
     Deref(TypedDerefNode),
+    ArrayLiteral(TypedArrayLiteralNode),
     Index(TypedIndexExpressionNode),
     FieldAccess(TypedFieldAccessNode),
     Broken,
@@ -1287,4 +1368,9 @@ pub(crate) struct TypedExternSignatureNode {
     pub params: Vec<(IdentLiteralTuple, Type)>,
     pub is_variadic: bool,
     pub ret_type: Type,
+}
+
+#[derive(Debug)]
+pub(crate) struct TypedArrayLiteralNode {
+    pub elems: Vec<TypedExpression>,
 }

@@ -759,6 +759,40 @@ impl<'a> Parser<'a> {
                     span: ident_token.span,
                 }))
             }
+            OpenBracket => {
+                let open_bracket = self.consume();
+                let typ = self.parse_type()?;
+                let semi = match self.expect(Semi) {
+                    Ok(t) => t,
+                    Err(broken) => return Err(broken.into()),
+                };
+                let size = match &self.peek().kind {
+                    Literal(LiteralKind::Int(i)) if *i >= 0 => {
+                        self.consume_quietly();
+                        *i as usize
+                    }
+                    _ => {
+                        let err = CompileError::unexpected_token(
+                            InvalidIdent("int literal for size".into()),
+                            token.kind.clone(),
+                            token.span,
+                        ); // Approximation
+                        self.diagnose.push_error(err);
+                        return Err(self.sync());
+                    }
+                };
+
+                let close_bracket = match self.expect(CloseBracket) {
+                    Ok(t) => t,
+                    Err(broken) => return Err(broken.into()),
+                };
+
+                Ok(TypeNode::Array {
+                    typ: Box::new(typ),
+                    size,
+                    span: Span::new(open_bracket.span.start, close_bracket.span.end),
+                })
+            }
             _ => {
                 let err = CompileError::unexpected_token(
                     InvalidIdent("type".into()),
@@ -836,6 +870,7 @@ impl<'a> Parser<'a> {
             Ident(_) => self.parse_ident_expr(),
             Literal(_) => self.parse_literal_expr(),
             OpenParam => self.parse_groupping(),
+            OpenBracket => self.parse_array_literal(),
             Bang | Minus => self.parse_unary(),
             And | Star => self.parse_reference(),
             CloseParam | CloseBrace | OpenBrace | Semi | Eof | Comma => {
@@ -859,6 +894,30 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
+    fn parse_array_literal(&mut self) -> Expression {
+        let mut open_bracket = self.consume();
+        let mut elems = Vec::new();
+
+        if self.peek().kind != TokenKind::CloseBracket {
+            loop {
+                elems.push(self.parse_expr());
+                if self.peek().kind != TokenKind::Comma {
+                    break;
+                }
+                self.consume();
+            }
+        }
+        let close_bracket = match self.expect(TokenKind::CloseBracket) {
+            Ok(t) => t,
+            Err(broken) => return Expression::Broken(broken),
+        };
+        Expression::ArrayLiteral(ArrayLiteralNode {
+            elems,
+            span: Span::new(open_bracket.span.start, close_bracket.span.end),
+        })
+    }
+
     fn parse_ident_expr(&mut self) -> Expression {
         let token = self.consume();
         let name = match &token.kind {
@@ -1393,6 +1452,7 @@ pub(crate) enum Expression {
     Call(CallNode),
     AddressOf(AddressOfNode),
     Deref(DerefNode),
+    ArrayLiteral(ArrayLiteralNode),
     Index(IndexExpressionNode),
     FieldAccess(FieldAccessNode),
     Broken(Span),
@@ -1407,6 +1467,7 @@ impl fmt::Debug for Expression {
             Self::AddressOf(n) => n.fmt(f),
             Self::Deref(n) => n.fmt(f),
             Self::Call(n) => n.fmt(f),
+            Self::ArrayLiteral(n) => n.fmt(f),
             Self::Index(n) => n.fmt(f),
             Self::FieldAccess(n) => n.fmt(f),
             Self::Broken(span) => write!(
@@ -1428,6 +1489,7 @@ impl Expression {
             Self::Call(x) => x.span,
             Self::AddressOf(x) => x.span,
             Self::Deref(x) => x.span,
+            Self::ArrayLiteral(x) => x.span,
             Self::Index(x) => x.span,
             Self::FieldAccess(x) => x.span,
             Self::Broken(x) => *x,
@@ -1585,7 +1647,15 @@ impl fmt::Debug for IdentLiteralNode {
 #[derive(Debug)]
 pub(crate) enum TypeNode {
     Named(IdentLiteralNode),
-    Reference { inner: Box<TypeNode>, span: Span },
+    Reference {
+        inner: Box<TypeNode>,
+        span: Span,
+    },
+    Array {
+        typ: Box<TypeNode>,
+        size: usize,
+        span: Span,
+    },
 }
 
 impl TypeNode {
@@ -1593,6 +1663,7 @@ impl TypeNode {
         match self {
             Self::Named(node) => &node.span,
             Self::Reference { span, .. } => span,
+            Self::Array { span, .. } => span,
         }
     }
 }
@@ -1646,6 +1717,12 @@ pub(crate) struct ExternSignatureNode {
 #[derive(Debug, Clone)]
 pub(crate) struct InjectNode {
     pub raw_content: String,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct ArrayLiteralNode {
+    pub elems: Vec<Expression>,
     pub span: Span,
 }
 

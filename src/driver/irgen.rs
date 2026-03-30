@@ -4,10 +4,10 @@ use crate::driver::{
     TypeKind,
     parse::{BinaryOperator, InjectNode, LiteralNode, LiteralValue, UnaryOperator},
     typecheck::{
-        IdentLiteralTuple, TypedAddressOfNode, TypedAssignmentNode, TypedBinaryExpressionNode,
-        TypedBlockNode, TypedCallNode, TypedDerefNode, TypedExpression, TypedExpressionKind,
-        TypedExternBlockNode, TypedFieldAccessNode, TypedFunDefNode, TypedIfNode,
-        TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
+        IdentLiteralTuple, TypedAddressOfNode, TypedArrayLiteralNode, TypedAssignmentNode,
+        TypedBinaryExpressionNode, TypedBlockNode, TypedCallNode, TypedDerefNode, TypedExpression,
+        TypedExpressionKind, TypedExternBlockNode, TypedFieldAccessNode, TypedFunDefNode,
+        TypedIfNode, TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
         TypedUnaryExpressionNode, TypedVarDecNode, TypedWhileNode,
     },
 };
@@ -19,9 +19,10 @@ pub enum Instruction {
     PushBool(bool),
     PushChar(char),
     PushStrId(usize),
+    PushValueId(usize),
 
-    Load(usize),
-    Store(usize),
+    Load,
+    Store,
     Init(usize, IrType),
     AddressOf(usize),
     LoadIndirect,
@@ -59,6 +60,12 @@ pub enum Instruction {
     FunParam(usize, IrType),
     FunBodyStart,
     FunEnd,
+
+    ArrayStart,
+    ArrayElem,
+    ArrayEnd,
+
+    IndexAccess,
 
     Discard,
 
@@ -265,12 +272,20 @@ impl IrGenerator {
         self.gen_from_expr(&node.right);
 
         match &node.left.kind {
-            TypedExpressionKind::Ident(ident) => self.emit(Instruction::Store(ident.id)),
+            TypedExpressionKind::Ident(ident) => {
+                self.emit(Instruction::PushValueId(ident.id));
+                self.emit(Instruction::Load);
+                self.emit(Instruction::Store);
+            }
             TypedExpressionKind::Deref(node) => {
                 self.gen_from_expr(&node.inner);
                 self.emit(Instruction::StoreIndirect);
             }
-            _ => unreachable!("only ident, deref"),
+            TypedExpressionKind::Index(node) => {
+                self.gen_from_expr_index(node);
+                self.emit(Instruction::Store);
+            }
+            _ => unreachable!("only ident, deref, index"),
         }
     }
 
@@ -335,8 +350,10 @@ impl IrGenerator {
         unimplemented!("ir: field access not supported yet!");
     }
 
-    fn gen_from_expr_index(&mut self, _node: &TypedIndexExpressionNode) {
-        unimplemented!("ir: index access not supported yet!")
+    fn gen_from_expr_index(&mut self, node: &TypedIndexExpressionNode) {
+        self.gen_from_expr(&node.target);
+        self.gen_from_expr(&node.index);
+        self.emit(Instruction::IndexAccess);
     }
 
     fn gen_from_expr_call(&mut self, node: &TypedCallNode) {
@@ -432,7 +449,8 @@ impl IrGenerator {
     }
 
     fn gen_from_expr_ident(&mut self, node: &IdentLiteralTuple) {
-        self.emit(Instruction::Load(node.id));
+        self.emit(Instruction::PushValueId(node.id));
+        self.emit(Instruction::Load);
     }
 
     fn gen_from_expr_literal(&mut self, node: &LiteralNode) {
@@ -461,6 +479,17 @@ impl IrGenerator {
         self.emit(Instruction::LoadIndirect);
     }
 
+    fn gen_from_expr_array_literal(&mut self, node: &TypedArrayLiteralNode) {
+        self.emit(Instruction::ArrayStart);
+
+        for elem in &node.elems {
+            self.gen_from_expr(elem);
+            self.emit(Instruction::ArrayElem);
+        }
+
+        self.emit(Instruction::ArrayEnd);
+    }
+
     fn gen_from_expr(&mut self, expr: &TypedExpression) {
         match &expr.kind {
             TypedExpressionKind::Binary(node) => self.gen_from_expr_binary(node),
@@ -470,6 +499,7 @@ impl IrGenerator {
             TypedExpressionKind::Call(node) => self.gen_from_expr_call(node),
             TypedExpressionKind::AddressOf(node) => self.gen_from_expr_addressof(node),
             TypedExpressionKind::Deref(node) => self.gen_from_expr_deref(node),
+            TypedExpressionKind::ArrayLiteral(node) => self.gen_from_expr_array_literal(node),
             TypedExpressionKind::Index(node) => self.gen_from_expr_index(node),
             TypedExpressionKind::FieldAccess(node) => self.gen_from_expr_field(node),
             TypedExpressionKind::Broken => {
@@ -554,6 +584,7 @@ pub enum IrType {
     Str,
     Void,
     Reference(Box<IrType>),
+    Array(Box<IrType>, usize),
 }
 
 impl From<&TypeKind> for IrType {
@@ -569,6 +600,10 @@ impl From<&TypeKind> for IrType {
             TypeKind::Reference(inner_type) => {
                 let inner = Self::from(&(**inner_type));
                 IrType::Reference(Box::new(inner))
+            }
+            TypeKind::Array(inner_type, size) => {
+                let inner = Self::from(&(**inner_type));
+                IrType::Array(Box::new(inner), *size)
             }
             TypeKind::Unknown => unreachable!("unknown type is imposible here"),
         }

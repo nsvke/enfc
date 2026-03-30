@@ -1,0 +1,29 @@
+extern "stdio.h" {
+    fun printf(fmt str, ..) int;
+}
+-- extern "stdlib.h" {}
+
+inject %{
+    int* malloc_int(int value) {
+        int* i = (int*)malloc(4);
+        *i = value;
+        return i;
+    }
+
+    void free_int(int* ptr) {
+        free(ptr);
+    }
+}%
+
+extern fun malloc_int(value int) &int;
+extern fun free_int(ptr &int) nret;
+
+
+fun main() nret {
+    -- val arr [int; 10];
+    var ptr = malloc_int(10);
+    *ptr = *ptr + 1000;
+    printf("value: %d\n", *ptr);
+    free_int(ptr);
+
+}
