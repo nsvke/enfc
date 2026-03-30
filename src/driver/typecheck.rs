@@ -5,7 +5,7 @@ use crate::diagnostic::Diagnostics;
 use crate::driver::parse::{
     AddressOfNode, AssignmentNode, BinaryExpressionNode, BinaryOperator, BlockNode, CallNode,
     DerefNode, Expression, ExternBlockNode, FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode,
-    IndexExpressionNode, LiteralNode, LiteralValue, ReturnNode, Statement, TypeNode,
+    IndexExpressionNode, InjectNode, LiteralNode, LiteralValue, ReturnNode, Statement, TypeNode,
     UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
 };
 use crate::structs::Span;
@@ -786,6 +786,11 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Statement::ExternBlock(node) => self.check_stmt_extern(node),
+            Statement::Inject(node) => TypedStatement {
+                kind: TypedStatementKind::Inject(node.clone()),
+                span: node.span,
+                terminates: false,
+            },
             Statement::Return(node) => self.check_stmt_ret(node),
             Statement::Break(span) => self.check_stmt_brk(*span),
             Statement::Continue(span) => self.check_stmt_cntn(*span),
@@ -1123,6 +1128,7 @@ pub(crate) enum TypedStatementKind {
     Expression(TypedExpression),
     ExpressionStatement(TypedExpression),
     ExternBlock(TypedExternBlockNode),
+    Inject(InjectNode),
     Return(TypedReturnNode),
     Break,
     Continue,

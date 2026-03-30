@@ -259,6 +259,8 @@ impl<'a> CCodeGen<'a> {
             head.push_str(fun);
         }
 
+        head.push_str(self.ir.inject());
+
         head.push('\n');
 
         head

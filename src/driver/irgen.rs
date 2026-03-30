@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::driver::{
     TypeKind,
-    parse::{BinaryOperator, LiteralNode, LiteralValue, UnaryOperator},
+    parse::{BinaryOperator, InjectNode, LiteralNode, LiteralValue, UnaryOperator},
     typecheck::{
         IdentLiteralTuple, TypedAddressOfNode, TypedAssignmentNode, TypedBinaryExpressionNode,
         TypedBlockNode, TypedCallNode, TypedDerefNode, TypedExpression, TypedExpressionKind,
@@ -71,6 +71,7 @@ pub(crate) struct IrGenerator {
     included_headers: Vec<String>,
     waiting_brks: Vec<Vec<usize>>,
     waiting_cntns: Vec<Vec<usize>>,
+    inject: String,
 }
 
 impl IrGenerator {
@@ -82,6 +83,7 @@ impl IrGenerator {
             included_headers: Vec::new(),
             waiting_brks: Vec::new(),
             waiting_cntns: Vec::new(),
+            inject: String::new(),
         }
     }
 
@@ -94,6 +96,7 @@ impl IrGenerator {
             str_pool: self.str_pool,
             fun_pool: self.fun_pool,
             included_headers: self.included_headers,
+            inject: self.inject,
         }
     }
 
@@ -302,6 +305,10 @@ impl IrGenerator {
         }
     }
 
+    fn take_inject(&mut self, node: &InjectNode) {
+        self.inject = node.raw_content.clone();
+    }
+
     fn gen_from_stmt(&mut self, stmt: &TypedStatement) {
         match &stmt.kind {
             TypedStatementKind::VarDeclaration(node) => self.gen_from_stmt_val(node),
@@ -311,6 +318,7 @@ impl IrGenerator {
             TypedStatementKind::FunDefinition(node) => self.gen_from_stmt_fun(node),
             TypedStatementKind::Block(node) => self.gen_from_stmt_block(node),
             TypedStatementKind::ExternBlock(node) => self.gen_from_stmt_extern_block(node),
+            TypedStatementKind::Inject(node) => self.take_inject(node),
             TypedStatementKind::Expression(expr) => self.gen_from_expr(expr),
             TypedStatementKind::ExpressionStatement(expr) => self.gen_from_expr_stmt(expr),
             TypedStatementKind::Return(node) => self.gen_from_stmt_return(node),
@@ -513,6 +521,7 @@ pub struct IrProgram {
     str_pool: Pool,
     fun_pool: Pool,
     included_headers: Vec<String>,
+    inject: String,
 }
 impl IrProgram {
     pub fn get_str(&self, id: usize) -> &str {
@@ -528,6 +537,9 @@ impl IrProgram {
     }
     pub fn included_headers(&self) -> &[String] {
         &self.included_headers
+    }
+    pub fn inject(&self) -> &String {
+        &self.inject
     }
 }
 

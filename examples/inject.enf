@@ -1,0 +1,37 @@
+inject %{
+    int calculate_circle_area_approx(int radius) {
+        float pi = 3.14159f;
+        float area = pi * (float)(radius * radius);
+        return (int)area; // enf doesnt support float numbers yet
+    }
+
+    #define MAGIC_NUMBER 4096
+
+    int get_magic_number() {
+        return MAGIC_NUMBER;
+    }
+}%
+
+-- function definitions, typechecker need to check them
+extern fun calculate_circle_area_approx(radius int) int;
+extern fun get_magic_number() int;
+
+extern "stdio.h" {
+    fun printf(fmt str, ..) int;
+}
+
+fun main() nret {
+    var radius = 10;
+
+    var area = calculate_circle_area_approx(radius);
+    printf("c: for radius 10, area is '%d'\n", area);
+
+    var magic_number = get_magic_number(); --> use c macros
+    printf("#define MAGIC_NUMBER %d\n", magic_number);
+
+    if magic_number == 4096 {
+        printf("that's correct!\n");
+    } else {
+        printf("we have a problem here! expected '4096', found: '%d'", magic_number);
+    }
+}

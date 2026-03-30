@@ -98,6 +98,7 @@ impl<'a> Parser<'a> {
             Val | Var => Some(self.parse_val()),
             Fun => Some(self.parse_fun()),
             Extern => Some(self.parse_extern()),
+            Inject => Some(self.parse_inject()),
             Break => Some(self.parse_brk()),
             Continue => Some(self.parse_cntn()),
             If => Some(self.parse_if()),
@@ -122,6 +123,24 @@ impl<'a> Parser<'a> {
                 Some(self.sync())
             }
         }
+    }
+
+    fn parse_inject(&mut self) -> Statement {
+        let inject_token = self.consume();
+
+        let raw_content;
+        let raw_content_token = match &self.peek().kind {
+            RawContent(s) => {
+                raw_content = s.clone();
+                self.consume()
+            }
+            _ => return self.sync(),
+        };
+
+        Statement::Inject(InjectNode {
+            raw_content,
+            span: raw_content_token.span,
+        })
     }
 
     fn parse_extern_signature(&mut self) -> Result<ExternSignatureNode, Span> {
@@ -1091,6 +1110,7 @@ pub(crate) enum Statement {
     Expression(Expression),
     ExpressionStatement(Expression),
     ExternBlock(ExternBlockNode),
+    Inject(InjectNode),
     Return(ReturnNode),
     Break(Span),
     Continue(Span),
@@ -1115,6 +1135,7 @@ impl fmt::Debug for Statement {
             Self::Expression(n) => n.fmt(f),
             Self::ExpressionStatement(n) => n.fmt(f),
             Self::ExternBlock(n) => n.fmt(f),
+            Self::Inject(n) => n.fmt(f),
             Self::Return(n) => n.fmt(f),
             Self::Break(n) => n.fmt(f),
             Self::Continue(n) => n.fmt(f),
@@ -1617,6 +1638,12 @@ pub(crate) struct ExternSignatureNode {
     pub params: Vec<(IdentLiteralNode, TypeNode)>,
     pub is_variadic: bool,
     pub ret_type: TypeNode,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InjectNode {
+    pub raw_content: String,
     pub span: Span,
 }
 

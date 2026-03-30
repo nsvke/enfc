@@ -51,9 +51,6 @@ impl Driver {
                 "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
             );
         });
-        if tokens.len() == 0 {
-            return;
-        }
 
         let parser = Parser::new(&tokens, self.diagnose_mut());
         let statements = parser.parse();

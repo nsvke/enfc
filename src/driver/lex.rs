@@ -23,6 +23,7 @@ static KEYWORDS: Map<&'static str, TokenKind> = phf_map! {
     "nll" => TokenKind::Null,
     "any" => TokenKind::Any,
     "extern" => TokenKind::Extern,
+    "inject" => TokenKind::Inject,
 };
 static SYMBOLS: Map<&'static str, TokenKind> = phf_map! {
     "--" => TokenKind::LineComment,
@@ -68,6 +69,8 @@ static SYMBOLS: Map<&'static str, TokenKind> = phf_map! {
     "<=" => TokenKind::LtEq,
     "!=" => TokenKind::NotEq,
     "?=" => TokenKind::QuestionEq,
+    "%{" => TokenKind::PercentOpenBrace,
+    "}%" => TokenKind::CLoseBracePercent,
 };
 
 const EOF_CHAR: char = '\0';
@@ -93,6 +96,7 @@ pub enum TokenKind {
     LineComment, // "--"
     WhiteSpace,
     // Comment(String),
+    RawContent(String),
     Ident(String),
     InvalidIdent(String),
     Literal(LiteralKind),
@@ -140,6 +144,8 @@ pub enum TokenKind {
     LtEq,       // "<="
     NotEq,      // "!="
     QuestionEq, // "?="
+    PercentOpenBrace,
+    CLoseBracePercent,
     //
     Unknown(String),
     Eof,
@@ -150,6 +156,7 @@ pub enum TokenKind {
     Const,
     Fun,
     Extern,
+    Inject,
     If,
     ElseIf,
     Else,
@@ -346,6 +353,8 @@ impl TokenKind {
             Self::LtEq => "LtEq".into(),
             Self::NotEq => "NotEq".into(),
             Self::QuestionEq => "QuestionEq".into(),
+            Self::PercentOpenBrace => "PercentOpenBrace".into(),
+            Self::CLoseBracePercent => "CloseBracePercent".into(),
             Self::Unknown(_) => "Unknown".into(),
             Self::Eof => "Eof".into(),
             Self::Val => "Val".into(),
@@ -367,6 +376,8 @@ impl TokenKind {
             Self::Impl => "Impl".into(),
             Self::Null => "Null".into(),
             Self::Any => "Any".into(),
+            Self::Inject => "Inject".into(),
+            Self::RawContent(_) => "RawContent".into(),
         }
     }
 }
@@ -414,6 +425,8 @@ impl<'a> Lexer<'a> {
                         self.eat_line_comment();
                     } else if d_sym == TokenKind::LineComment {
                         self.eat_line_comment();
+                    } else if d_sym == TokenKind::PercentOpenBrace {
+                        self.save_raw_content(off);
                     } else {
                         self.push_ident_token_w_kind(d_sym, off, end2);
                     }
@@ -444,6 +457,31 @@ impl<'a> Lexer<'a> {
         };
         self.push_ident_token_w_kind(TokenKind::Eof, end, end + 1);
         self.tokens
+    }
+
+    fn save_raw_content(&mut self, start: usize) {
+        let mut raw_content = String::new();
+        for (off, c) in self.iter.by_ref() {
+            match c {
+                '%' => {
+                    if let Some(c) = raw_content.pop() {
+                        if c == '}' {
+                            self.tokens.push(Token {
+                                kind: TokenKind::RawContent(raw_content),
+                                span: Span::new(start, off),
+                            });
+                            return;
+                        } else {
+                            raw_content.push(c);
+                            raw_content.push('%');
+                        }
+                    } else {
+                        raw_content.push('%');
+                    }
+                }
+                _ => raw_content.push(c),
+            }
+        }
     }
 
     fn end_offset(&mut self) -> Option<usize> {
