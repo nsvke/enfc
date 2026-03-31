@@ -71,6 +71,8 @@ static SYMBOLS: Map<&'static str, TokenKind> = phf_map! {
     "?=" => TokenKind::QuestionEq,
     "%{" => TokenKind::PercentOpenBrace,
     "}%" => TokenKind::CLoseBracePercent,
+    "<<" => TokenKind::LeftShift,
+    ">>" => TokenKind::RightShift,
 };
 
 const EOF_CHAR: char = '\0';
@@ -382,6 +384,8 @@ impl TokenKind {
             Self::Any => "Any".into(),
             Self::Inject => "Inject".into(),
             Self::RawContent(_) => "RawContent".into(),
+            Self::LeftShift => "LeftShift".into(),
+            Self::RightShift => "RightShift".into(),
         }
     }
 }

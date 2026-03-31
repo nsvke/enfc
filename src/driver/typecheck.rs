@@ -1209,6 +1209,17 @@ impl<'a> TypeChecker<'a> {
                         self.diagnose.push_error(expected_error);
                     }
                 }
+                BinaryOperator::BitwiseOr
+                | BinaryOperator::BitwiseXor
+                | BinaryOperator::BitwiseAnd
+                | BinaryOperator::BitwiseLeftShift
+                | BinaryOperator::BitwiseRightShift => {
+                    if typed_left.typ == TypeKind::Int && typed_left.typ == typed_right.typ {
+                        typ = TypeKind::Int;
+                    } else {
+                        self.diagnose.push_error(expected_error);
+                    }
+                }
             }
         }
 
@@ -1241,6 +1252,7 @@ impl<'a> TypeChecker<'a> {
         let expected_op = match node.operator {
             UnaryOperator::Neg => TypeKind::Int,
             UnaryOperator::Not => TypeKind::Bool,
+            UnaryOperator::Tilde => TypeKind::Int,
         };
 
         let typed_operand = self.check_expr(&node.operand);
@@ -1254,6 +1266,7 @@ impl<'a> TypeChecker<'a> {
                 match node.operator {
                     UnaryOperator::Neg => '-',
                     UnaryOperator::Not => '!',
+                    UnaryOperator::Tilde => '~',
                 },
             ));
             typ = TypeKind::Unknown;

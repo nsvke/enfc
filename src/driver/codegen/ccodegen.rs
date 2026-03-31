@@ -160,6 +160,26 @@ impl<'a> CCodeGen<'a> {
                     let (l, r) = self.stack_pop_binary();
                     self.stack.push(format!("({} % {})", l, r));
                 }
+                Instruction::BitwiseOr => {
+                    let (l, r) = self.stack_pop_binary();
+                    self.stack.push(format!("({} | {})", l, r));
+                }
+                Instruction::BitwiseXor => {
+                    let (l, r) = self.stack_pop_binary();
+                    self.stack.push(format!("({} ^ {})", l, r));
+                }
+                Instruction::BitwiseAnd => {
+                    let (l, r) = self.stack_pop_binary();
+                    self.stack.push(format!("({} & {})", l, r));
+                }
+                Instruction::BitwiseLeftShift => {
+                    let (l, r) = self.stack_pop_binary();
+                    self.stack.push(format!("({} << {})", l, r));
+                }
+                Instruction::BitwiseRightShift => {
+                    let (l, r) = self.stack_pop_binary();
+                    self.stack.push(format!("({} >> {})", l, r));
+                }
                 Instruction::Eq => {
                     let (l, r) = self.stack_pop_binary();
                     self.stack.push(format!("({} == {})", l, r));
@@ -179,6 +199,10 @@ impl<'a> CCodeGen<'a> {
                 Instruction::Not => {
                     let o = self.stack_pop();
                     self.stack.push(format!("(!({}))", o));
+                }
+                Instruction::Tilde => {
+                    let o = self.stack_pop();
+                    self.stack.push(format!("(~({}))", o));
                 }
                 Instruction::Jump(index) => {
                     output.push_str(&format!("goto instr_index_{};\n", index));

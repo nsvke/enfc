@@ -955,7 +955,7 @@ impl<'a> Parser<'a> {
             Literal(_) => self.parse_literal_expr(),
             OpenParam => self.parse_groupping(),
             OpenBracket => self.parse_array_literal(),
-            Bang | Minus => self.parse_unary(),
+            Bang | Minus | Tilde => self.parse_unary(),
             And | Star => self.parse_reference(),
             CloseParam | CloseBrace | OpenBrace | Semi | Eof | Comma => {
                 let err = CompileError::unexpected_token(
@@ -1129,6 +1129,7 @@ impl<'a> Parser<'a> {
         let operator = match token.kind {
             Bang => UnaryOperator::Not,
             Minus => UnaryOperator::Neg,
+            Tilde => UnaryOperator::Tilde,
             _ => unreachable!(),
         };
 
@@ -1265,6 +1266,11 @@ impl<'a> Parser<'a> {
             Star => BinaryOperator::Mul,
             Slash => BinaryOperator::Div,
             Percent => BinaryOperator::Percent,
+            Or => BinaryOperator::BitwiseOr,
+            Caret => BinaryOperator::BitwiseXor,
+            And => BinaryOperator::BitwiseAnd,
+            LeftShift => BinaryOperator::BitwiseLeftShift,
+            RightShift => BinaryOperator::BitwiseRightShift,
             _ => unreachable!("Token {:?} is not a binary operator", token.kind),
         };
         let precedence = Precedence::precedence_of(&token.kind);
@@ -1523,6 +1529,12 @@ pub(crate) enum BinaryOperator {
     LessEquals,
     Greater,
     GreaterEquals,
+    //Bitwise
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseAnd,
+    BitwiseRightShift,
+    BitwiseLeftShift,
     // Term
     Add,
     Sub,
@@ -1548,6 +1560,11 @@ impl fmt::Debug for BinaryOperator {
             Self::Mul => "Mul".into(),
             Self::Div => "Div".into(),
             Self::Percent => "Percent".into(),
+            Self::BitwiseOr => "BitwiseOr".into(),
+            Self::BitwiseXor => "BitwiseXor".into(),
+            Self::BitwiseAnd => "BitwiseAnd".into(),
+            Self::BitwiseLeftShift => "BitwiseLeftShift".into(),
+            Self::BitwiseRightShift => "BitwiseRightShift".into(),
         };
         write!(f, "\x1b[38;2;100;100;250m{}\x1b[0m", fmt)
     }
@@ -1561,6 +1578,10 @@ enum Precedence {
     And,        // &&
     Equality,   // == !=
     Comparison, // < > <= >=
+    BitwiseOr,  // |
+    BitwiseXor, // ^
+    BitwiseAnd, // &
+    Shift,      // << >>
     Term,       // + -
     Factor,     // * / %
     Unary,      // ! - (also * &) (also ~)
@@ -1579,6 +1600,10 @@ impl Precedence {
             Star | Slash | Percent => Self::Factor,
             OpenParam | Dot | OpenBracket => Self::Call,
             Tilde => Self::Unary,
+            And => Self::BitwiseAnd,
+            Or => Self::BitwiseOr,
+            Caret => Self::BitwiseXor,
+            LeftShift | RightShift => Self::Shift,
             _ => Self::None,
         }
     }
@@ -1589,7 +1614,11 @@ impl Precedence {
             Self::Or => Self::And,
             Self::And => Self::Equality,
             Self::Equality => Self::Comparison,
-            Self::Comparison => Self::Term,
+            Self::Comparison => Self::BitwiseOr,
+            Self::BitwiseOr => Self::BitwiseXor,
+            Self::BitwiseXor => Self::BitwiseAnd,
+            Self::BitwiseAnd => Self::Shift,
+            Self::Shift => Self::Term,
             Self::Term => Self::Factor,
             Self::Factor => Self::Unary,
             Self::Unary => Self::Call,
@@ -1736,6 +1765,7 @@ impl fmt::Debug for UnaryExpressionNode {
 pub(crate) enum UnaryOperator {
     Not,
     Neg,
+    Tilde,
 }
 
 impl fmt::Debug for UnaryOperator {
@@ -1743,6 +1773,7 @@ impl fmt::Debug for UnaryOperator {
         let fmt: String = match self {
             Self::Neg => "neg".into(),
             Self::Not => "not".into(),
+            Self::Tilde => "tilde".into(),
         };
         write!(f, "\x1b[38;2;240;100;100m{}\x1b[0m", fmt)
     }

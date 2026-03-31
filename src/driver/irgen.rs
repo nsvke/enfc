@@ -45,10 +45,14 @@ pub enum Instruction {
 
     Neg,
     Not,
+    Tilde,
 
-    // _BitAnd, todo
-    // _BitOr, todo
-    // _BitXor, todo
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseLeftShift,
+    BitwiseRightShift,
+
     Jump(usize),
     JumpIfFalse(usize),
 
@@ -421,6 +425,7 @@ impl IrGenerator {
         match node.operator {
             UnaryOperator::Neg => self.emit(Instruction::Neg),
             UnaryOperator::Not => self.emit(Instruction::Not),
+            UnaryOperator::Tilde => self.emit(Instruction::Tilde),
         }
     }
 
@@ -484,6 +489,11 @@ impl IrGenerator {
             BinaryOperator::Mul => self.emit(Instruction::Mul),
             BinaryOperator::Div => self.emit(Instruction::Div),
             BinaryOperator::Percent => self.emit(Instruction::Mod),
+            BinaryOperator::BitwiseOr => self.emit(Instruction::BitwiseOr),
+            BinaryOperator::BitwiseXor => self.emit(Instruction::BitwiseXor),
+            BinaryOperator::BitwiseAnd => self.emit(Instruction::BitwiseAnd),
+            BinaryOperator::BitwiseLeftShift => self.emit(Instruction::BitwiseLeftShift),
+            BinaryOperator::BitwiseRightShift => self.emit(Instruction::BitwiseRightShift),
         }
     }
 

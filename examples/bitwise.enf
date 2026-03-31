@@ -1,0 +1,33 @@
+fun main() int {
+    if (12 & 10) != 8 {
+        ret 1;
+    }
+
+    if (12 | 10) != 14 {
+        ret 2;
+    }
+
+    if (12 ^ 10) != 6 {
+        ret 3;
+    }
+
+    if (3 << 2) != 12 {
+        ret 4;
+    }
+
+    if (12 >> 2) != 3 {
+        ret 5;
+    }
+
+    val mask = ~0;
+    if mask != -1 {
+        ret 6;
+    }
+
+    val opcode = 41712;
+    if opcode & 3840 != 512 {
+        ret 7;
+    }
+
+    ret 0;
+}
