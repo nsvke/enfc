@@ -88,6 +88,8 @@ impl<'a> CCodeGen<'a> {
                     self.stack.push(format!("\"{}\"", s));
                 }
                 Instruction::PushValueId(id) => self.stack.push(id.to_string()),
+                Instruction::PushNull => self.stack.push("NULL".into()),
+                Instruction::PushZeroArray => self.stack.push("{0}".into()),
                 Instruction::Load => {
                     let x_id = self.stack_pop();
                     self.stack.push(format!("enf_var_{}", x_id));

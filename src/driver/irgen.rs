@@ -20,6 +20,8 @@ pub enum Instruction {
     PushChar(char),
     PushStrId(usize),
     PushValueId(usize),
+    PushNull,
+    PushZeroArray,
 
     Load,
     Store,
@@ -290,7 +292,24 @@ impl IrGenerator {
     }
 
     fn gen_from_stmt_val(&mut self, node: &TypedVarDecNode) {
-        self.gen_from_expr(&node.initalizer);
+        match &node.initializer {
+            Some(initializer) => self.gen_from_expr(&initializer),
+            None => match &node.var_type.kind {
+                TypeKind::Int => self.emit(Instruction::PushInt(0)),
+                TypeKind::Float => self.emit(Instruction::PushFloat(0.0)),
+                TypeKind::Bool => self.emit(Instruction::PushBool(false)),
+                TypeKind::Char => self.emit(Instruction::PushChar('\0')),
+                TypeKind::Str => {
+                    let id = self.get_str_id("".into());
+                    self.emit(Instruction::PushStrId(id));
+                }
+                TypeKind::Reference(_) => self.emit(Instruction::PushNull),
+                TypeKind::Array(_, _) => self.emit(Instruction::PushZeroArray),
+                TypeKind::Function { .. } => unreachable!(),
+                TypeKind::Nret => unreachable!(),
+                TypeKind::Unknown => unreachable!(),
+            },
+        }
 
         self.emit(Instruction::Init(
             node.name_id.value_id,

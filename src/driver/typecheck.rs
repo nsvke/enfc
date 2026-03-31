@@ -645,7 +645,10 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_stmt_val(&mut self, node: &VarDecNode) -> TypedStatement {
-        let typed_initalizer = self.check_expr(&node.initalizer);
+        let typed_initializer = match &node.initializer {
+            Some(expr) => Some(self.check_expr(&expr)),
+            None => None,
+        };
 
         let mut typ: Type;
 
@@ -683,25 +686,44 @@ impl<'a> TypeChecker<'a> {
             typ = self.resolve_types(&node.var_type);
 
             if !typ.kind.is_unknown() {
-                if typ.kind != typed_initalizer.typ {
-                    self.diagnose.push_error(CompileError::type_mismatch(
-                        typ.kind.clone(),
-                        typed_initalizer.typ.clone(),
-                        Span {
-                            // val x int = 12;
-                            //     ^^^^^
-                            start: node.name.span.start,
-                            end: typ.span.end,
-                        },
-                        typed_initalizer.span,
-                        "=".into(),
-                        MismatchKind::Regular,
-                    ));
+                match &typed_initializer {
+                    Some(initializer) => {
+                        if typ.kind != initializer.typ {
+                            self.diagnose.push_error(CompileError::type_mismatch(
+                                typ.kind.clone(),
+                                initializer.typ.clone(),
+                                Span {
+                                    // val x int = 12;
+                                    //     ^^^^^
+                                    start: node.name.span.start,
+                                    end: typ.span.end,
+                                },
+                                initializer.span,
+                                "=".into(),
+                                MismatchKind::Regular,
+                            ));
+                        }
+                    }
+                    None => {}
                 }
             } else {
-                typ = Type {
-                    span: node.name.span,
-                    kind: typed_initalizer.typ.clone(),
+                match &typed_initializer {
+                    Some(init) => {
+                        typ = Type {
+                            span: node.name.span,
+                            kind: init.typ.clone(),
+                        }
+                    }
+                    None => {
+                        self.diagnose.push_error(CompileError::type_mismatch(
+                            TypeKind::Unknown,
+                            TypeKind::Unknown,
+                            node.name.span,
+                            node.name.span,
+                            "=".into(),
+                            MismatchKind::Regular,
+                        ));
+                    }
                 }
             }
 
@@ -723,7 +745,7 @@ impl<'a> TypeChecker<'a> {
                     span: node.span,
                 },
                 var_type: typ,
-                initalizer: typed_initalizer,
+                initializer: typed_initializer,
                 mutable: node.mutable,
             }),
             span: node.span,
@@ -1270,7 +1292,7 @@ pub(crate) struct TypedWhileNode {
 pub(crate) struct TypedVarDecNode {
     pub name_id: IdentLiteralIdNode,
     pub var_type: Type,
-    pub initalizer: TypedExpression,
+    pub initializer: Option<TypedExpression>,
     pub mutable: bool,
 }
 #[derive(Debug)]
