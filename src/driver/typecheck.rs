@@ -306,7 +306,10 @@ impl<'a> TypeChecker<'a> {
                             is_extern,
                             is_variadic: false,
                         } => {
-                            if params.len() != 0 || ret.kind != TypeKind::Nret || *is_extern {
+                            if params.len() != 0
+                                || (ret.kind != TypeKind::Nret && ret.kind != TypeKind::Int)
+                                || *is_extern
+                            {
                                 self.diagnose.push_error(CompileError::wrong_main(loc));
                             }
                         }

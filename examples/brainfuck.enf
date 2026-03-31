@@ -1,0 +1,85 @@
+extern "stdio.h" {
+    fun printf(fmt str, ..) int;
+    fun putchar(c int) int;
+}
+
+extern "string.h" {
+    fun strlen(s str) int;
+}
+
+inject %{
+    int char_at(const char* s, int index) {
+        return (int)s[index];
+    }
+}%
+
+extern fun char_at(s str, index int) int;
+
+fun main() nret {
+    val program = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.";
+    val prog_len = strlen(program);
+
+    var tape [int; 30000];
+
+    var ptr = 0;
+    var pc = 0;
+
+    whl pc < prog_len {
+        val cmd = char_at(program, pc);
+
+        -- '>' (62):
+        if cmd == 62 {
+            ptr = ptr + 1;
+        }
+
+        -- '<' (60):
+        if cmd == 60 {
+            ptr = ptr - 1;
+        }
+
+        -- '+' (43):
+        if cmd == 43 {
+            tape[ptr] = tape[ptr] + 1;
+        }
+
+        -- '-' (45):
+        if cmd == 45 {
+            tape[ptr] = tape[ptr] - 1;
+        }
+
+        -- '.' (46):
+        if cmd == 46 {
+            putchar(tape[ptr]);
+        }
+
+        -- '[' (91):
+        if cmd == 91 {
+            if tape[ptr] == 0 {
+                var depth = 1;
+                whl depth > 0 {
+                    pc = pc + 1;
+                    val c = char_at(program, pc);
+                    if c == 91 { depth = depth + 1; }
+                    if c == 93 { depth = depth - 1; }
+                }
+            }
+        }
+
+        -- ']' (93):
+        if cmd == 93 {
+            if tape[ptr] != 0 {
+                var depth = 1;
+                whl depth > 0 {
+                    pc = pc - 1;
+                    val c = char_at(program, pc);
+                    if c == 93 { depth = depth + 1; }
+                    if c == 91 { depth = depth - 1; }
+                }
+            }
+        }
+
+        pc = pc + 1;
+    }
+
+    printf("\n--- Program End ---\n");
+}

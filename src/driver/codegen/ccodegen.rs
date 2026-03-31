@@ -46,6 +46,7 @@ pub(crate) struct CCodeGen<'a> {
     current_fun_sign: String,
     current_array: Vec<String>,
     fun_signs: Vec<String>,
+    main_return_type: IrType,
 }
 
 impl<'a> CCodeGen<'a> {
@@ -58,6 +59,7 @@ impl<'a> CCodeGen<'a> {
             current_fun_sign: String::new(),
             current_array: Vec::new(),
             fun_signs: Vec::new(),
+            main_return_type: IrType::Void,
         }
     }
     fn run(mut self) -> Self {
@@ -206,6 +208,7 @@ impl<'a> CCodeGen<'a> {
                 }
                 Instruction::ExternFunStart(id, typ) => {
                     let name = self.ir.get_fun_name(*id);
+
                     output.push_str(&format!("{} {}(", typ.as_c_type(), name));
 
                     self.current_fun_sign
@@ -229,6 +232,11 @@ impl<'a> CCodeGen<'a> {
                 }
                 Instruction::FunStart(id, typ) => {
                     let name = self.ir.get_fun_name(*id);
+
+                    if name == "main" {
+                        self.main_return_type = typ.clone();
+                    }
+
                     output.push_str(&format!("{} enf_fun_{}(", typ.as_c_type(), name));
 
                     self.current_fun_sign.push_str(&format!(
@@ -289,8 +297,11 @@ impl<'a> CCodeGen<'a> {
             }
         }
 
-        output.push_str("int main() { enf_fun_main(); return 0; }");
-
+        match self.main_return_type {
+            IrType::Void => output.push_str("int main() { enf_fun_main(); return 0; }"),
+            IrType::I32 => output.push_str("int main() { return enf_fun_main(); }"),
+            _ => unreachable!(),
+        }
         let head = self.generate_head();
 
         self.output.push_str(&head);
