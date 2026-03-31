@@ -47,6 +47,15 @@ pub enum SemanticError {
         found: usize,
         span: Span,
     },
+    MissingFields {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+    MissingField {
+        expected: String,
+        span: Span,
+    },
     UnexpectedType {
         expected: TypeKind,
         found: TypeKind,
@@ -94,6 +103,12 @@ pub enum SemanticError {
     ContinueOutsideLoop {
         span: Span,
     },
+    CannotFieldAccess {
+        span: Span,
+    },
+    NestedData {
+        span: Span,
+    },
 }
 #[derive(Debug)]
 pub enum SymbolKind {
@@ -101,6 +116,7 @@ pub enum SymbolKind {
     Variable,
     Parameter,
     Builtin,
+    Data,
 }
 #[derive(Debug, PartialEq)]
 pub enum MismatchKind {
@@ -187,6 +203,16 @@ impl CompileError {
             span,
         })
     }
+    pub fn missing_fields(expected: usize, found: usize, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::MissingFields {
+            expected,
+            found,
+            span,
+        })
+    }
+    pub fn missing_field(expected: String, span: Span) -> Self {
+        CompileError::Semantic(SemanticError::MissingField { expected, span })
+    }
     pub fn unexpected_type(expected: TypeKind, found: TypeKind, span: Span) -> Self {
         CompileError::Semantic(SemanticError::UnexpectedType {
             expected,
@@ -208,6 +234,9 @@ impl CompileError {
     }
     pub fn nested_function(span: Span) -> Self {
         CompileError::Semantic(SemanticError::NestedFunction { span })
+    }
+    pub fn nested_datas(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::NestedData { span })
     }
     pub fn missing_return(span: Span) -> Self {
         CompileError::Semantic(SemanticError::MissingReturn { span })
@@ -232,6 +261,9 @@ impl CompileError {
     }
     pub fn continue_outside_loop(span: Span) -> Self {
         CompileError::Semantic(SemanticError::ContinueOutsideLoop { span })
+    }
+    pub fn cannot_field_access(span: Span) -> Self {
+        CompileError::Semantic(SemanticError::CannotFieldAccess { span })
     }
 }
 
@@ -268,6 +300,10 @@ impl CompileError {
             Self::Semantic(SemanticError::CannotAddressable { span }) => *span,
             Self::Semantic(SemanticError::BreakOutsideLoop { span }) => *span,
             Self::Semantic(SemanticError::ContinueOutsideLoop { span }) => *span,
+            Self::Semantic(SemanticError::MissingFields { span, .. }) => *span,
+            Self::Semantic(SemanticError::MissingField { span, .. }) => *span,
+            Self::Semantic(SemanticError::CannotFieldAccess { span }) => *span,
+            Self::Semantic(SemanticError::NestedData { span }) => *span,
         }
     }
 }

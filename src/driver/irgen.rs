@@ -5,9 +5,10 @@ use crate::driver::{
     parse::{BinaryOperator, InjectNode, LiteralNode, LiteralValue, UnaryOperator},
     typecheck::{
         IdentLiteralTuple, TypedAddressOfNode, TypedArrayLiteralNode, TypedAssignmentNode,
-        TypedBinaryExpressionNode, TypedBlockNode, TypedCallNode, TypedDerefNode, TypedExpression,
-        TypedExpressionKind, TypedExternBlockNode, TypedFieldAccessNode, TypedFunDefNode,
-        TypedIfNode, TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
+        TypedBinaryExpressionNode, TypedBlockNode, TypedCallNode, TypedDataDecNode,
+        TypedDataInitNode, TypedDerefNode, TypedExpression, TypedExpressionKind,
+        TypedExternBlockNode, TypedFieldAccessNode, TypedFunDefNode, TypedIfNode,
+        TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
         TypedUnaryExpressionNode, TypedVarDecNode, TypedWhileNode,
     },
 };
@@ -21,7 +22,7 @@ pub enum Instruction {
     PushStrId(usize),
     PushValueId(usize),
     PushNull,
-    PushZeroArray,
+    PushZeroInit,
 
     Load,
     Store,
@@ -62,6 +63,14 @@ pub enum Instruction {
     FunParam(usize, IrType),
     FunBodyStart,
     FunEnd,
+
+    DataStart(usize),
+    DataField(usize, IrType),
+    DataEnd,
+
+    DataInit(usize, usize),
+
+    DataFieldAccess(usize),
 
     ArrayStart,
     ArrayElem,
@@ -304,7 +313,8 @@ impl IrGenerator {
                     self.emit(Instruction::PushStrId(id));
                 }
                 TypeKind::Reference(_) => self.emit(Instruction::PushNull),
-                TypeKind::Array(_, _) => self.emit(Instruction::PushZeroArray),
+                TypeKind::Array(_, _) => self.emit(Instruction::PushZeroInit),
+                TypeKind::Data(_) => self.emit(Instruction::PushZeroInit),
                 TypeKind::Function { .. } => unreachable!(),
                 TypeKind::Nret => unreachable!(),
                 TypeKind::Unknown => unreachable!(),
@@ -344,6 +354,14 @@ impl IrGenerator {
         self.inject = node.raw_content.clone();
     }
 
+    fn gen_from_stmt_data(&mut self, node: &TypedDataDecNode) {
+        self.emit(Instruction::DataStart(node.name.id));
+        for field in &node.fields {
+            self.emit(Instruction::DataField(field.0.id, (&field.1.kind).into()));
+        }
+        self.emit(Instruction::DataEnd);
+    }
+
     fn gen_from_stmt(&mut self, stmt: &TypedStatement) {
         match &stmt.kind {
             TypedStatementKind::VarDeclaration(node) => self.gen_from_stmt_val(node),
@@ -353,6 +371,7 @@ impl IrGenerator {
             TypedStatementKind::FunDefinition(node) => self.gen_from_stmt_fun(node),
             TypedStatementKind::Block(node) => self.gen_from_stmt_block(node),
             TypedStatementKind::ExternBlock(node) => self.gen_from_stmt_extern_block(node),
+            TypedStatementKind::DataDeclaration(node) => self.gen_from_stmt_data(node),
             TypedStatementKind::Inject(node) => self.take_inject(node),
             TypedStatementKind::Expression(expr) => self.gen_from_expr(expr),
             TypedStatementKind::ExpressionStatement(expr) => self.gen_from_expr_stmt(expr),
@@ -365,8 +384,9 @@ impl IrGenerator {
         };
     }
 
-    fn gen_from_expr_field(&mut self, _node: &TypedFieldAccessNode) {
-        unimplemented!("ir: field access not supported yet!");
+    fn gen_from_expr_field(&mut self, node: &TypedFieldAccessNode) {
+        self.gen_from_expr(&node.target);
+        self.emit(Instruction::DataFieldAccess(node.field.id));
     }
 
     fn gen_from_expr_index(&mut self, node: &TypedIndexExpressionNode) {
@@ -509,6 +529,14 @@ impl IrGenerator {
         self.emit(Instruction::ArrayEnd);
     }
 
+    fn gen_from_expr_data(&mut self, node: &TypedDataInitNode) {
+        for (tuple, expr) in &node.values {
+            self.emit(Instruction::PushValueId(tuple.id));
+            self.gen_from_expr(expr);
+        }
+        self.emit(Instruction::DataInit(node.name.id, node.values.len()));
+    }
+
     fn gen_from_expr(&mut self, expr: &TypedExpression) {
         match &expr.kind {
             TypedExpressionKind::Binary(node) => self.gen_from_expr_binary(node),
@@ -520,6 +548,7 @@ impl IrGenerator {
             TypedExpressionKind::Deref(node) => self.gen_from_expr_deref(node),
             TypedExpressionKind::ArrayLiteral(node) => self.gen_from_expr_array_literal(node),
             TypedExpressionKind::Index(node) => self.gen_from_expr_index(node),
+            TypedExpressionKind::DataInit(node) => self.gen_from_expr_data(node),
             TypedExpressionKind::FieldAccess(node) => self.gen_from_expr_field(node),
             TypedExpressionKind::Broken => {
                 unreachable!("hey typechecker, what the hell is this doing here?")
@@ -604,6 +633,7 @@ pub enum IrType {
     Void,
     Reference(Box<IrType>),
     Array(Box<IrType>, usize),
+    Data(usize),
 }
 
 impl From<&TypeKind> for IrType {
@@ -616,6 +646,7 @@ impl From<&TypeKind> for IrType {
             TypeKind::Str => Self::Str,
             TypeKind::Function { ret, .. } => Self::from(&ret.kind),
             TypeKind::Nret => Self::Void,
+            TypeKind::Data(tuple) => Self::Data(tuple.id),
             TypeKind::Reference(inner_type) => {
                 let inner = Self::from(&(**inner_type));
                 IrType::Reference(Box::new(inner))

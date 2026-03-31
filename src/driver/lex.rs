@@ -139,6 +139,8 @@ pub enum TokenKind {
     Arrow,      // "->"
     BackArrow,  // "<-"
     SlashSlash, // "//"
+    LeftShift,  // "<<"
+    RightShift, // ">>"
     EqEq,       // "=="
     GtEq,       // ">="
     LtEq,       // "<="

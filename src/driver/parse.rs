@@ -98,6 +98,7 @@ impl<'a> Parser<'a> {
             Val | Var => Some(self.parse_val()),
             Fun => Some(self.parse_fun()),
             Extern => Some(self.parse_extern()),
+            Data => Some(self.parse_data_dec()),
             Inject => Some(self.parse_inject()),
             Break => Some(self.parse_brk()),
             Continue => Some(self.parse_cntn()),
@@ -602,6 +603,80 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // data $ident { [$ident $type_ident,] }
+    fn parse_data_dec(&mut self) -> Statement {
+        let data_token = self.consume();
+
+        let mut ident_name = String::new();
+        let ident_token = match &self.peek().kind {
+            Ident(ident) => {
+                ident_name = ident.clone();
+                self.consume()
+            }
+            _ => {
+                self.diagnose.push_error(CompileError::unexpected_token(
+                    Ident("ident".into()),
+                    self.peek().kind.clone(),
+                    self.peek().span,
+                ));
+                return self.sync();
+            }
+        };
+
+        if let Err(broken) = self.expect(OpenBrace) {
+            return broken.into();
+        }
+
+        let mut fields = Vec::new();
+        while self.peek().kind != TokenKind::CloseBrace {
+            let mut field_ident_name = String::new();
+            let field_ident_token = match &self.peek().kind {
+                Ident(ident) => {
+                    field_ident_name = ident.clone();
+                    self.consume()
+                }
+                _ => {
+                    self.diagnose.push_error(CompileError::unexpected_token(
+                        Ident("ident".into()),
+                        self.peek().kind.clone(),
+                        self.peek().span,
+                    ));
+                    return self.sync();
+                }
+            };
+            let field_type_node = match self.parse_type() {
+                Ok(t) => t,
+                Err(b) => return b,
+            };
+
+            if let Err(broken) = self.expect(Comma) {
+                return broken.into();
+            }
+
+            fields.push((
+                IdentLiteralNode {
+                    value: field_ident_name,
+                    span: Span::new(field_ident_token.span.start, field_type_node.span().end),
+                },
+                field_type_node,
+            ));
+        }
+
+        let end_token = match self.expect(CloseBrace) {
+            Ok(t) => t,
+            Err(broken) => return broken.into(),
+        };
+
+        Statement::DataDeclaration(DataDecNode {
+            name: IdentLiteralNode {
+                value: ident_name,
+                span: ident_token.span,
+            },
+            fields,
+            span: Span::new(data_token.span.start, end_token.span.end),
+        })
+    }
+
     // whl $expr $block
     fn parse_whl(&mut self) -> Statement {
         let whl = self.consume();
@@ -875,6 +950,7 @@ impl<'a> Parser<'a> {
     fn parse_prefix(&mut self) -> Expression {
         let token = self.peek();
         match token.kind {
+            Ident(_) if self.peek_at(1).kind == OpenBrace => self.parse_data_init(),
             Ident(_) => self.parse_ident_expr(),
             Literal(_) => self.parse_literal_expr(),
             OpenParam => self.parse_groupping(),
@@ -901,6 +977,67 @@ impl<'a> Parser<'a> {
                 self.parse_prefix()
             }
         }
+    }
+
+    fn parse_data_init(&mut self) -> Expression {
+        let ident_token = self.consume();
+        let ident_name = match &ident_token.kind {
+            Ident(s) => s.clone(),
+            _ => unreachable!(),
+        };
+
+        let open_brace_token = self.consume();
+
+        let mut values = Vec::new();
+        while self.peek().kind != CloseBrace {
+            let mut field_name = String::new();
+            let field_token = match &self.peek().kind {
+                Ident(val) => {
+                    field_name = val.clone();
+                    self.consume()
+                }
+                _ => {
+                    self.diagnose.push_error(CompileError::unexpected_token(
+                        Ident("ident".into()),
+                        self.peek().kind.clone(),
+                        self.peek().span,
+                    ));
+                    return Expression::Broken(self.sync_span());
+                }
+            };
+
+            if let Err(broken) = self.expect(Colon) {
+                return Expression::Broken(broken);
+            }
+
+            let expr = self.parse_expr();
+
+            values.push((
+                IdentLiteralNode {
+                    value: field_name,
+                    span: field_token.span,
+                },
+                expr,
+            ));
+
+            if self.peek().kind == Comma {
+                self.consume_quietly();
+            }
+        }
+
+        let end_token = match self.expect(CloseBrace) {
+            Ok(t) => t,
+            Err(broken) => return Expression::Broken(broken),
+        };
+
+        Expression::DataInit(DataInitNode {
+            name: IdentLiteralNode {
+                value: ident_name,
+                span: ident_token.span,
+            },
+            values,
+            span: Span::new(ident_token.span.start, end_token.span.end),
+        })
     }
 
     fn parse_array_literal(&mut self) -> Expression {
@@ -1179,6 +1316,7 @@ pub(crate) enum Statement {
     ExpressionStatement(Expression),
     ExternBlock(ExternBlockNode),
     Inject(InjectNode),
+    DataDeclaration(DataDecNode),
     Return(ReturnNode),
     Break(Span),
     Continue(Span),
@@ -1203,6 +1341,7 @@ impl fmt::Debug for Statement {
             Self::Expression(n) => n.fmt(f),
             Self::ExpressionStatement(n) => n.fmt(f),
             Self::ExternBlock(n) => n.fmt(f),
+            Self::DataDeclaration(n) => n.fmt(f),
             Self::Inject(n) => n.fmt(f),
             Self::Return(n) => n.fmt(f),
             Self::Break(n) => n.fmt(f),
@@ -1229,6 +1368,13 @@ impl fmt::Debug for BlockNode {
         )?;
         f.debug_list().entries(&self.body).finish()
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct DataDecNode {
+    pub name: IdentLiteralNode,
+    pub fields: Vec<(IdentLiteralNode, TypeNode)>,
+    pub span: Span,
 }
 
 pub(crate) struct FunDefNode {
@@ -1417,7 +1563,7 @@ enum Precedence {
     Comparison, // < > <= >=
     Term,       // + -
     Factor,     // * / %
-    Unary,      // ! - (also * &)
+    Unary,      // ! - (also * &) (also ~)
     Call,       // () [] .
     Primary,    // Literal Ident Grouping
 }
@@ -1432,6 +1578,7 @@ impl Precedence {
             Plus | Minus => Self::Term,
             Star | Slash | Percent => Self::Factor,
             OpenParam | Dot | OpenBracket => Self::Call,
+            Tilde => Self::Unary,
             _ => Self::None,
         }
     }
@@ -1462,6 +1609,7 @@ pub(crate) enum Expression {
     Deref(DerefNode),
     ArrayLiteral(ArrayLiteralNode),
     Index(IndexExpressionNode),
+    DataInit(DataInitNode),
     FieldAccess(FieldAccessNode),
     Broken(Span),
 }
@@ -1477,6 +1625,7 @@ impl fmt::Debug for Expression {
             Self::Call(n) => n.fmt(f),
             Self::ArrayLiteral(n) => n.fmt(f),
             Self::Index(n) => n.fmt(f),
+            Self::DataInit(n) => n.fmt(f),
             Self::FieldAccess(n) => n.fmt(f),
             Self::Broken(span) => write!(
                 f,
@@ -1499,6 +1648,7 @@ impl Expression {
             Self::Deref(x) => x.span,
             Self::ArrayLiteral(x) => x.span,
             Self::Index(x) => x.span,
+            Self::DataInit(x) => x.span,
             Self::FieldAccess(x) => x.span,
             Self::Broken(x) => *x,
         }
@@ -1731,6 +1881,13 @@ pub(crate) struct InjectNode {
 #[derive(Debug)]
 pub(crate) struct ArrayLiteralNode {
     pub elems: Vec<Expression>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct DataInitNode {
+    pub name: IdentLiteralNode,
+    pub values: Vec<(IdentLiteralNode, Expression)>,
     pub span: Span,
 }
 

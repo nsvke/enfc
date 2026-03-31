@@ -21,6 +21,7 @@ impl AsCType for IrType {
             IrType::Char => "char".into(),
             IrType::Str => "const char*".into(),
             IrType::Void => "void".into(),
+            IrType::Data(id) => format!("struct enf_data_{}", id),
             IrType::Reference(inner_type) => format!("{}*", inner_type.as_c_type()),
             IrType::Array(inner_type, _) => {
                 format!("{}*", inner_type.as_c_type())
@@ -44,8 +45,10 @@ pub(crate) struct CCodeGen<'a> {
     output: String,
     current_params: Vec<String>,
     current_fun_sign: String,
-    current_array: Vec<String>,
     fun_signs: Vec<String>,
+    current_data_decl: String,
+    data_decls: Vec<String>,
+    current_array: Vec<String>,
     main_return_type: IrType,
 }
 
@@ -59,6 +62,8 @@ impl<'a> CCodeGen<'a> {
             current_fun_sign: String::new(),
             current_array: Vec::new(),
             fun_signs: Vec::new(),
+            current_data_decl: String::new(),
+            data_decls: Vec::new(),
             main_return_type: IrType::Void,
         }
     }
@@ -91,7 +96,7 @@ impl<'a> CCodeGen<'a> {
                 }
                 Instruction::PushValueId(id) => self.stack.push(id.to_string()),
                 Instruction::PushNull => self.stack.push("NULL".into()),
-                Instruction::PushZeroArray => self.stack.push("{0}".into()),
+                Instruction::PushZeroInit => self.stack.push("{0}".into()),
                 Instruction::Load => {
                     let x_id = self.stack_pop();
                     self.stack.push(format!("enf_var_{}", x_id));
@@ -282,6 +287,35 @@ impl<'a> CCodeGen<'a> {
                     let target = self.stack_pop();
                     self.stack.push(format!("{}[{}]", target, index));
                 }
+                Instruction::DataFieldAccess(id) => {
+                    let target = self.stack_pop();
+                    self.stack.push(format!("{}.enf_field_{}", target, id));
+                }
+                Instruction::DataStart(id) => {
+                    self.current_data_decl.clear();
+                    self.current_data_decl
+                        .push_str(&format!("struct enf_data_{} {{", id));
+                }
+                Instruction::DataField(id, typ) => {
+                    let (base_type, dimensions) = typ.as_c_array_format();
+                    self.current_data_decl
+                        .push_str(&format!("{} enf_field_{}{};", base_type, id, dimensions));
+                }
+                Instruction::DataEnd => {
+                    self.current_data_decl.push_str("};\n");
+                    self.data_decls.push(self.current_data_decl.clone());
+                }
+                Instruction::DataInit(id, len) => {
+                    let mut values = Vec::new();
+                    for i in 0..(*len) {
+                        let val = self.stack_pop();
+                        let val_id = self.stack_pop();
+                        values.push(format!(".enf_field_{} = {}", val_id, val));
+                    }
+                    let values_joined = values.join(", ");
+                    let full = format!("(struct enf_data_{}){{ {} }}", id, values_joined);
+                    self.stack.push(full);
+                }
                 Instruction::Discard => {
                     let val = self.stack_pop();
                     output.push_str(&format!("{};\n", val));
@@ -298,8 +332,8 @@ impl<'a> CCodeGen<'a> {
         }
 
         match self.main_return_type {
-            IrType::Void => output.push_str("int main() { enf_fun_main(); return 0; }"),
-            IrType::I32 => output.push_str("int main() { return enf_fun_main(); }"),
+            IrType::Void => output.push_str("int main(int argc, char** argv) { enf_env_argc = argc; enf_env_argv = argv; enf_fun_main(); return 0; }"),
+            IrType::I32 => output.push_str("int main(int argc, char** argv) { enf_env_argc = argc; enf_env_argv = argv; return enf_fun_main(); }"),
             _ => unreachable!(),
         }
         let head = self.generate_head();
@@ -316,6 +350,10 @@ impl<'a> CCodeGen<'a> {
             head.push_str(&format!("#include<{}>\n", included));
         }
         head.push_str("#include <stdint.h>\n#include <stdbool.h>\n");
+
+        for data in &self.data_decls {
+            head.push_str(data);
+        }
 
         for fun in &self.fun_signs {
             head.push_str(fun);

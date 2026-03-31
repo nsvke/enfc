@@ -56,6 +56,7 @@ pub mod fmt_miette_impl {
                     SymbolKind::Variable => "variable redefinition here".into(),
                     SymbolKind::Parameter => "parameter redefinition here".into(),
                     SymbolKind::Builtin => "builtin redefinition here".into(),
+                    SymbolKind::Data => "data type redefinition here".into(),
                 },
                 CompileError::Semantic(SemanticError::UnknownType { .. }) => {
                     "this is not a type".into()
@@ -263,6 +264,21 @@ pub mod fmt_miette_impl {
                         expected, found
                     )
                 }
+                CompileError::Semantic(SemanticError::MissingFields {
+                    expected, found, ..
+                }) => {
+                    write!(
+                        f,
+                        "this data takes {} values but {} values were supplied",
+                        expected, found
+                    )
+                }
+                CompileError::Semantic(SemanticError::MissingField { expected, .. }) => {
+                    write!(f, "field '{}' is missing", expected,)
+                }
+                CompileError::Semantic(SemanticError::CannotFieldAccess { .. }) => {
+                    write!(f, "cannot access fields because this is not a data")
+                }
                 CompileError::Semantic(SemanticError::UnexpectedType {
                     span,
                     expected,
@@ -289,6 +305,9 @@ pub mod fmt_miette_impl {
                 }
                 CompileError::Semantic(SemanticError::NestedFunction { .. }) => {
                     write!(f, "nested functions is not supported")
+                }
+                CompileError::Semantic(SemanticError::NestedData { .. }) => {
+                    write!(f, "nested datas is not supported")
                 }
                 CompileError::Semantic(SemanticError::MissingReturn { .. }) => {
                     write!(

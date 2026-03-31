@@ -4,9 +4,10 @@ use crate::compile_error::{CompileError, MismatchKind, SymbolKind};
 use crate::diagnostic::Diagnostics;
 use crate::driver::parse::{
     AddressOfNode, ArrayLiteralNode, AssignmentNode, BinaryExpressionNode, BinaryOperator,
-    BlockNode, CallNode, DerefNode, Expression, ExternBlockNode, FieldAccessNode, FunDefNode,
-    IdentLiteralNode, IfNode, IndexExpressionNode, InjectNode, LiteralNode, LiteralValue,
-    ReturnNode, Statement, TypeNode, UnaryExpressionNode, UnaryOperator, VarDecNode, WhileNode,
+    BlockNode, CallNode, DataDecNode, DataInitNode, DerefNode, Expression, ExternBlockNode,
+    FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode, IndexExpressionNode, InjectNode,
+    LiteralNode, LiteralValue, ReturnNode, Statement, TypeNode, UnaryExpressionNode, UnaryOperator,
+    VarDecNode, WhileNode,
 };
 use crate::structs::Span;
 use phf::{Map, phf_map};
@@ -52,6 +53,7 @@ pub enum TypeKind {
     },
     Reference(Box<TypeKind>),
     Array(Box<TypeKind>, usize),
+    Data(IdentLiteralTuple),
     Unknown,
 }
 
@@ -79,6 +81,7 @@ impl std::fmt::Display for TypeKind {
             Self::Nret => write!(f, "nret"),
             Self::Function { .. } => write!(f, "function"),
             Self::Unknown => write!(f, "unknown"),
+            Self::Data(s) => write!(f, "{}", s.val),
             Self::Reference(inner) => {
                 let inn = format!("{}", inner);
                 write!(f, "&{}", inn)
@@ -102,8 +105,8 @@ pub(crate) struct Symbol {
 pub(crate) struct TypeChecker<'a> {
     // statements: &'a [Statement],
     scopes: Vec<HashMap<String, Symbol>>,
+    data_blueprints: HashMap<String, TypedDataDecNode>,
     diagnose: &'a mut Diagnostics,
-    // destruct: bool,
     expected_return: Option<(TypeKind, Span)>,
     next_ident_id: usize,
     main_loc: Option<Span>,
@@ -114,6 +117,7 @@ impl<'a> TypeChecker<'a> {
     pub(crate) fn new(diagnose: &'a mut Diagnostics) -> Self {
         let mut new_type_checker = Self {
             scopes: vec![HashMap::new()],
+            data_blueprints: HashMap::new(),
             diagnose,
             expected_return: None,
             next_ident_id: 1,
@@ -132,10 +136,22 @@ impl<'a> TypeChecker<'a> {
 
     fn check_and_collect(&mut self, statements: &'a [Statement]) -> Vec<TypedStatement> {
         let mut typed_statements = Vec::new();
+        let blueprints = self.collect_data_blueprints(statements);
+        for node in blueprints {
+            typed_statements.push(TypedStatement {
+                span: node.span,
+                kind: TypedStatementKind::DataDeclaration(node),
+                terminates: false,
+            });
+        }
         self.collect_signatures(statements);
         self.check_main_sign();
         for stmt in statements {
-            typed_statements.push(self.check_stmt(stmt));
+            let typed_stmt = self.check_stmt(stmt);
+            match typed_stmt {
+                Some(s) => typed_statements.push(s),
+                None => {}
+            }
         }
         let eof_span = match typed_statements.last() {
             Some(stmt) => Span {
@@ -170,9 +186,13 @@ impl<'a> TypeChecker<'a> {
                 "nret" => TypeKind::Nret,
                 "" => TypeKind::Unknown,
                 val => {
-                    self.diagnose
-                        .push_error(CompileError::unknown_type(val.into(), *typ.span()));
-                    TypeKind::Unknown
+                    if let Some(blueprint) = self.data_blueprints.get(val) {
+                        TypeKind::Data(blueprint.name.clone())
+                    } else {
+                        self.diagnose
+                            .push_error(CompileError::unknown_type(val.into(), *typ.span()));
+                        TypeKind::Unknown
+                    }
                 }
             },
             TypeNode::Reference { inner, .. } => {
@@ -207,11 +227,46 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn collect_data_blueprints(&mut self, statements: &'a [Statement]) -> Vec<TypedDataDecNode> {
+        let mut typed_statements = Vec::new();
+        for stmt in statements {
+            match stmt {
+                Statement::DataDeclaration(node) => {
+                    let typed_stmt = self.check_stmt_data(node);
+                    match self.data_blueprints.entry(node.name.value.clone()) {
+                        Entry::Occupied(occupied_entry) => {
+                            self.diagnose.push_error(CompileError::symbol_redefinition(
+                                node.name.value.clone(),
+                                occupied_entry.get().span,
+                                node.name.span,
+                                SymbolKind::Data,
+                            ))
+                        }
+                        Entry::Vacant(entry) => {
+                            let typed_node = match typed_stmt.kind {
+                                TypedStatementKind::DataDeclaration(node) => {
+                                    typed_statements.push(node.clone());
+                                    node
+                                }
+                                _ => {
+                                    continue;
+                                }
+                            };
+                            entry.insert(typed_node);
+                        }
+                    };
+                }
+                _ => {}
+            }
+        }
+        typed_statements
+    }
+
     fn collect_signatures(&mut self, statements: &'a [Statement]) {
         for stmt in statements {
-            let id = self.give_ident_id();
             match stmt {
                 Statement::FunDefinition(node) => {
+                    let id = self.give_ident_id();
                     if node.name.value == "main" {
                         self.main_loc = Some(Span {
                             start: node.name.span.start,
@@ -256,6 +311,7 @@ impl<'a> TypeChecker<'a> {
                 Statement::ExternBlock(node) => {
                     for sign in &node.signatures {
                         // TODO check redefinition first, resolve types later
+                        let id = self.give_ident_id();
                         let params = sign
                             .params
                             .iter()
@@ -361,7 +417,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_stmt_fun(&mut self, node: &FunDefNode) -> TypedStatement {
-        if self.expected_return.is_some() {
+        if self.expected_return.is_some() || self.loop_depth > 0 {
             self.diagnose
                 .push_error(CompileError::nested_function(Span {
                     start: node.name.span.start,
@@ -544,12 +600,17 @@ impl<'a> TypeChecker<'a> {
         for stmt in &node.body {
             let typed_stmt = self.check_stmt(stmt);
 
-            // TODO add dead code warning
-            if typed_stmt.terminates {
-                terminates = true;
-            }
+            match typed_stmt {
+                Some(typed_stm) => {
+                    // TODO add dead code warning
+                    if typed_stm.terminates {
+                        terminates = true;
+                    }
 
-            body.push(typed_stmt);
+                    body.push(typed_stm);
+                }
+                None => {}
+            }
         }
 
         self.exit_scope();
@@ -613,6 +674,7 @@ impl<'a> TypeChecker<'a> {
             }
             TypedExpressionKind::Deref(node) => {}
             TypedExpressionKind::Index(node) => self.check_lvalue_mutability(&node.target),
+            TypedExpressionKind::FieldAccess(node) => {}
             _ => self
                 .diagnose
                 .push_error(CompileError::invalid_l_value(expr.span)),
@@ -817,55 +879,121 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_stmt(&mut self, stmt: &Statement) -> TypedStatement {
+    fn check_stmt_data(&mut self, node: &DataDecNode) -> TypedStatement {
+        if self.expected_return.is_some() || self.loop_depth > 0 {
+            self.diagnose
+                .push_error(CompileError::nested_datas(node.name.span));
+
+            return self.broken_typed_stmt(node.span);
+        }
+
+        let name_tuple = IdentLiteralTuple {
+            val: node.name.value.clone(),
+            id: self.give_ident_id(),
+        };
+
+        let mut fields = Vec::new();
+        for field in &node.fields {
+            let field_name_tuple = IdentLiteralTuple {
+                val: field.0.value.clone(),
+                id: self.give_ident_id(),
+            };
+            let field_typ = self.resolve_types(&field.1);
+
+            fields.push((field_name_tuple, field_typ));
+        }
+
+        TypedStatement {
+            kind: TypedStatementKind::DataDeclaration(TypedDataDecNode {
+                name: name_tuple,
+                fields,
+                span: node.span, // duplicated for redefined errors
+            }),
+            span: node.span,
+            terminates: false,
+        }
+    }
+
+    fn check_stmt(&mut self, stmt: &Statement) -> Option<TypedStatement> {
         match stmt {
-            Statement::VarDeclaration(node) => self.check_stmt_val(node),
-            Statement::Assignment(node) => self.check_stmt_asgn(node),
-            Statement::If(node) => self.check_stmt_if(node),
-            Statement::While(node) => self.check_stmt_whl(node),
-            Statement::FunDefinition(node) => self.check_stmt_fun(node),
-            Statement::Block(node) => self.check_stmt_block(node),
+            Statement::VarDeclaration(node) => Some(self.check_stmt_val(node)),
+            Statement::Assignment(node) => Some(self.check_stmt_asgn(node)),
+            Statement::If(node) => Some(self.check_stmt_if(node)),
+            Statement::While(node) => Some(self.check_stmt_whl(node)),
+            Statement::FunDefinition(node) => Some(self.check_stmt_fun(node)),
+            Statement::DataDeclaration(node) => None, //self.check_stmt_data(node),
+            Statement::Block(node) => Some(self.check_stmt_block(node)),
             Statement::Expression(expr) => {
                 let typed_expr = self.check_expr(expr);
-                TypedStatement {
+                Some(TypedStatement {
                     span: typed_expr.span,
                     kind: TypedStatementKind::Expression(typed_expr),
                     terminates: false,
-                }
+                })
             }
             Statement::ExpressionStatement(expr) => {
                 let typed_expr = self.check_expr(expr);
-                TypedStatement {
+                Some(TypedStatement {
                     span: typed_expr.span,
                     kind: TypedStatementKind::ExpressionStatement(typed_expr),
                     terminates: false,
-                }
+                })
             }
-            Statement::ExternBlock(node) => self.check_stmt_extern(node),
-            Statement::Inject(node) => TypedStatement {
+            Statement::ExternBlock(node) => Some(self.check_stmt_extern(node)),
+            Statement::Inject(node) => Some(TypedStatement {
                 kind: TypedStatementKind::Inject(node.clone()),
                 span: node.span,
                 terminates: false,
-            },
-            Statement::Return(node) => self.check_stmt_ret(node),
-            Statement::Break(span) => self.check_stmt_brk(*span),
-            Statement::Continue(span) => self.check_stmt_cntn(*span),
-            Statement::Broken(span) => self.broken_typed_stmt(*span),
+            }),
+            Statement::Return(node) => Some(self.check_stmt_ret(node)),
+            Statement::Break(span) => Some(self.check_stmt_brk(*span)),
+            Statement::Continue(span) => Some(self.check_stmt_cntn(*span)),
+            Statement::Broken(span) => Some(self.broken_typed_stmt(*span)),
         }
     }
 
     fn check_expr_field(&mut self, node: &FieldAccessNode) -> TypedExpression {
-        self.diagnose
-            .push_error(CompileError::feature_not_supported(
-                "FieldAccess".into(),
-                node.span,
-            ));
+        let typed_target = self.check_expr(&node.target);
+
+        let mut typ = TypeKind::Unknown;
+        let mut field_tuple = IdentLiteralTuple {
+            val: node.field.value.clone(),
+            id: self.give_ident_id(),
+        };
+        match &typed_target.typ {
+            TypeKind::Data(tuple) => {
+                if let Some(blueprint) = self.data_blueprints.get(&tuple.val).cloned() {
+                    let expected_field = blueprint
+                        .fields
+                        .iter()
+                        .find(|(bp_ident, _)| bp_ident.val == node.field.value);
+
+                    match expected_field {
+                        Some((field_ident, field_typ)) => {
+                            typ = field_typ.kind.clone();
+                            field_tuple = field_ident.clone();
+                        }
+                        None => {
+                            self.diagnose.push_error(CompileError::unknown_symbol(
+                                format!(".{}", node.field.value),
+                                node.field.span,
+                            ));
+                        }
+                    }
+                }
+            }
+            TypeKind::Unknown => {}
+            _ => self
+                .diagnose
+                .push_error(CompileError::cannot_field_access(typed_target.span)),
+        }
+
         TypedExpression {
             kind: TypedExpressionKind::FieldAccess(TypedFieldAccessNode {
-                target: Box::new(self.check_expr(&node.target)),
-                field: node.field.clone(),
+                target: Box::new(typed_target),
+                field: field_tuple,
             }),
-            typ: TypeKind::Unknown,
+            typ,
             span: node.span,
         }
     }
@@ -910,6 +1038,46 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_expr_call(&mut self, node: &CallNode) -> TypedExpression {
+        // BUILTIN CHECK
+        match &(*node.primary) {
+            Expression::Ident(IdentLiteralNode { value, span }) => {
+                if value == "len" {
+                    if node.arguments.len() == 1 {
+                        let arg = self.check_expr(&node.arguments[0]);
+                        match &arg.typ {
+                            TypeKind::Array(_, size) => {
+                                return TypedExpression {
+                                    kind: TypedExpressionKind::Literal(LiteralNode {
+                                        value: LiteralValue::Number(*size as i32),
+                                        span: node.span,
+                                    }),
+                                    typ: TypeKind::Int,
+                                    span: node.span,
+                                };
+                            }
+                            _ => {
+                                self.diagnose.push_error(CompileError::unexpected_type(
+                                    TypeKind::Array(Box::new(TypeKind::Unknown), 0),
+                                    arg.typ.clone(),
+                                    node.span,
+                                ));
+                                return self.broken_typed_expr(node.span);
+                            }
+                        }
+                    } else {
+                        self.diagnose.push_error(CompileError::missing_argument(
+                            1,
+                            node.arguments.len(),
+                            node.span,
+                        ));
+                        return self.broken_typed_expr(node.span); // TODO return call node with typekind::unknown
+                    }
+                }
+            }
+            _ => {}
+        }
+        // BUILTIN CHECK
+
         let typed_primary = self.check_expr(&node.primary);
 
         let mut typ = TypeKind::Unknown;
@@ -1212,6 +1380,79 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn check_expr_data(&mut self, node: &DataInitNode) -> TypedExpression {
+        let mut typed_values = Vec::new();
+        let mut typ = TypeKind::Unknown;
+        let mut name: IdentLiteralTuple;
+
+        if let Some(blueprint) = self.data_blueprints.get(&node.name.value).cloned() {
+            typ = TypeKind::Data(blueprint.name.clone());
+            name = blueprint.name.clone();
+
+            // for partial initialization
+            // if blueprint.fields.len() != node.values.len() {
+            //     self.diagnose.push_error(CompileError::missing_fields(
+            //         blueprint.fields.len(),
+            //         node.values.len(),
+            //         node.span,
+            //     ));
+            // }
+
+            // let mut provided_fields = std::collections::HashSet::new();
+            for (val_ident, val_expr) in &node.values {
+                let expected_field = blueprint
+                    .fields
+                    .iter()
+                    .find(|(bp_ident, _)| bp_ident.val == val_ident.value);
+
+                match expected_field {
+                    Some((bp_ident, expected_typ)) => {
+                        let typed_expr = self.check_expr(val_expr);
+                        if typed_expr.typ != expected_typ.kind {
+                            self.diagnose.push_error(CompileError::unexpected_type(
+                                expected_typ.kind.clone(),
+                                typed_expr.typ.clone(),
+                                typed_expr.span,
+                            ));
+                        }
+                        typed_values.push((bp_ident.clone(), typed_expr));
+
+                        // provided_fields.insert(val_ident.value.clone());
+                    }
+                    None => self.diagnose.push_error(CompileError::unknown_symbol(
+                        val_ident.value.clone(),
+                        val_ident.span,
+                    )),
+                }
+            }
+
+            // for partial initialization
+            // for (bp_ident, _) in &blueprint.fields {
+            //     if !provided_fields.contains(&bp_ident.val) {
+            //         self.diagnose
+            //             .push_error(CompileError::missing_field(bp_ident.val.clone(), node.span));
+            //     }
+            // }
+        } else {
+            name = IdentLiteralTuple {
+                val: node.name.value.clone(),
+                id: self.give_ident_id(),
+            };
+            self.diagnose.push_error(CompileError::unknown_symbol(
+                node.name.value.clone(),
+                node.span,
+            ));
+        }
+        TypedExpression {
+            kind: TypedExpressionKind::DataInit(TypedDataInitNode {
+                name,
+                values: typed_values,
+            }),
+            typ,
+            span: node.span,
+        }
+    }
+
     fn check_expr(&mut self, expr: &Expression) -> TypedExpression {
         match expr {
             Expression::Binary(node) => self.check_expr_binary(node),
@@ -1223,6 +1464,7 @@ impl<'a> TypeChecker<'a> {
             Expression::Deref(node) => self.check_expr_deref(node),
             Expression::ArrayLiteral(node) => self.check_expr_array_literal(node),
             Expression::Index(node) => self.check_expr_index(node),
+            Expression::DataInit(node) => self.check_expr_data(node),
             Expression::FieldAccess(node) => self.check_expr_field(node),
             Expression::Broken(span) => self.broken_typed_expr(*span),
         }
@@ -1250,6 +1492,7 @@ pub(crate) enum TypedStatementKind {
     If(TypedIfNode),
     While(TypedWhileNode),
     FunDefinition(TypedFunDefNode),
+    DataDeclaration(TypedDataDecNode),
     Block(TypedBlockNode),
     Expression(TypedExpression),
     ExpressionStatement(TypedExpression),
@@ -1322,6 +1565,7 @@ pub(crate) enum TypedExpressionKind {
     Deref(TypedDerefNode),
     ArrayLiteral(TypedArrayLiteralNode),
     Index(TypedIndexExpressionNode),
+    DataInit(TypedDataInitNode),
     FieldAccess(TypedFieldAccessNode),
     Broken,
 }
@@ -1334,7 +1578,7 @@ pub(crate) struct TypedIndexExpressionNode {
 #[derive(Debug)]
 pub(crate) struct TypedFieldAccessNode {
     pub target: Box<TypedExpression>,
-    pub field: IdentLiteralNode,
+    pub field: IdentLiteralTuple,
 }
 #[derive(Debug)]
 pub(crate) struct TypedBinaryExpressionNode {
@@ -1375,8 +1619,8 @@ pub(crate) struct IdentLiteralIdNode {
     pub span: Span,
 }
 
-#[derive(Debug)]
-pub(crate) struct IdentLiteralTuple {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct IdentLiteralTuple {
     pub val: String,
     pub id: usize,
 }
@@ -1398,4 +1642,17 @@ pub(crate) struct TypedExternSignatureNode {
 #[derive(Debug)]
 pub(crate) struct TypedArrayLiteralNode {
     pub elems: Vec<TypedExpression>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TypedDataDecNode {
+    pub name: IdentLiteralTuple,
+    pub fields: Vec<(IdentLiteralTuple, Type)>,
+    span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct TypedDataInitNode {
+    pub name: IdentLiteralTuple,
+    pub values: Vec<(IdentLiteralTuple, TypedExpression)>,
 }
