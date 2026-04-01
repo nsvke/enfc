@@ -1,3 +1,5 @@
+compile_flag "no_std";
+
 extern "stdio.h" {
     fun putchar(c int) int;
 }

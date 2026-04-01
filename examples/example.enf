@@ -1,3 +1,5 @@
+compile_flag "no_std";
+
 -- Welcome to the ENF language syntax example.
 -- This file demonstrates the core features of the language.
 

@@ -45,7 +45,10 @@ impl Diagnostics {
         self.errors.len()
     }
 
-    #[inline]
+    pub fn source_code_mut(&mut self) -> &mut String {
+        &mut self.config.source_code
+    }
+
     pub fn source_code(&self) -> &String {
         &self.config.source_code
     }

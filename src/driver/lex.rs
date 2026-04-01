@@ -24,6 +24,7 @@ static KEYWORDS: Map<&'static str, TokenKind> = phf_map! {
     "any" => TokenKind::Any,
     "extern" => TokenKind::Extern,
     "inject" => TokenKind::Inject,
+    "as" => TokenKind::As,
 };
 static SYMBOLS: Map<&'static str, TokenKind> = phf_map! {
     "--" => TokenKind::LineComment,
@@ -175,6 +176,7 @@ pub enum TokenKind {
     Impl,
     Null,
     Any,
+    As,
     // holder
 }
 
@@ -386,6 +388,7 @@ impl TokenKind {
             Self::RawContent(_) => "RawContent".into(),
             Self::LeftShift => "LeftShift".into(),
             Self::RightShift => "RightShift".into(),
+            Self::As => "As".into(),
         }
     }
 }

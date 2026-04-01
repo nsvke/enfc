@@ -5,7 +5,7 @@ use crate::driver::{
     parse::{BinaryOperator, InjectNode, LiteralNode, LiteralValue, UnaryOperator},
     typecheck::{
         IdentLiteralTuple, TypedAddressOfNode, TypedArrayLiteralNode, TypedAssignmentNode,
-        TypedBinaryExpressionNode, TypedBlockNode, TypedCallNode, TypedDataDecNode,
+        TypedBinaryExpressionNode, TypedBlockNode, TypedCallNode, TypedCastNode, TypedDataDecNode,
         TypedDataInitNode, TypedDerefNode, TypedExpression, TypedExpressionKind,
         TypedExternBlockNode, TypedFieldAccessNode, TypedFunDefNode, TypedIfNode,
         TypedIndexExpressionNode, TypedReturnNode, TypedStatement, TypedStatementKind,
@@ -81,6 +81,8 @@ pub enum Instruction {
     ArrayEnd,
 
     IndexAccess,
+
+    Cast(IrType),
 
     Discard,
 
@@ -355,7 +357,7 @@ impl IrGenerator {
     }
 
     fn take_inject(&mut self, node: &InjectNode) {
-        self.inject = node.raw_content.clone();
+        self.inject.push_str(&node.raw_content);
     }
 
     fn gen_from_stmt_data(&mut self, node: &TypedDataDecNode) {
@@ -547,6 +549,11 @@ impl IrGenerator {
         self.emit(Instruction::DataInit(node.name.id, node.values.len()));
     }
 
+    fn gen_from_expr_cast(&mut self, node: &TypedCastNode) {
+        self.gen_from_expr(&node.target);
+        self.emit(Instruction::Cast((&node.typ.kind).into()));
+    }
+
     fn gen_from_expr(&mut self, expr: &TypedExpression) {
         match &expr.kind {
             TypedExpressionKind::Binary(node) => self.gen_from_expr_binary(node),
@@ -560,6 +567,7 @@ impl IrGenerator {
             TypedExpressionKind::Index(node) => self.gen_from_expr_index(node),
             TypedExpressionKind::DataInit(node) => self.gen_from_expr_data(node),
             TypedExpressionKind::FieldAccess(node) => self.gen_from_expr_field(node),
+            TypedExpressionKind::Cast(node) => self.gen_from_expr_cast(node),
             TypedExpressionKind::Broken => {
                 unreachable!("hey typechecker, what the hell is this doing here?")
             }

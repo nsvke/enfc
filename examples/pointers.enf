@@ -1,3 +1,5 @@
+compile_flag "no_std";
+
 extern fun putchar(c int) int;
 extern fun puts(text str) int;
 

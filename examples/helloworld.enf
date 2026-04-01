@@ -1,3 +1,5 @@
+compile_flag "no_std";
+
 extern fun puts(text str) int;
 
 fun main() nret {

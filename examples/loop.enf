@@ -1,4 +1,7 @@
+compile_flag "no_std";
+
 extern fun putchar(c int) int;
+
 fun print_int_h(i int) nret {
     if i > 9 {
         print_int_h(i / 10);

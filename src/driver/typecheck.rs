@@ -6,8 +6,8 @@ use crate::driver::parse::{
     AddressOfNode, ArrayLiteralNode, AssignmentNode, BinaryExpressionNode, BinaryOperator,
     BlockNode, CallNode, DataDecNode, DataInitNode, DerefNode, Expression, ExternBlockNode,
     FieldAccessNode, FunDefNode, IdentLiteralNode, IfNode, IndexExpressionNode, InjectNode,
-    LiteralNode, LiteralValue, ReturnNode, Statement, TypeNode, UnaryExpressionNode, UnaryOperator,
-    VarDecNode, WhileNode,
+    LiteralNode, LiteralValue, ReturnNode, Statement, TypeCastNode, TypeNode, UnaryExpressionNode,
+    UnaryOperator, VarDecNode, WhileNode,
 };
 use crate::structs::Span;
 use phf::{Map, phf_map};
@@ -1466,6 +1466,23 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn check_expr_cast(&mut self, node: &TypeCastNode) -> TypedExpression {
+        let typed_target = self.check_expr(&node.target);
+
+        let typ = self.resolve_types(&node.typ);
+
+        // if !typed_target.typ.is_unknown() && !typ.kind.is_unknown() {}
+
+        TypedExpression {
+            typ: typ.kind.clone(),
+            kind: TypedExpressionKind::Cast(TypedCastNode {
+                target: Box::new(typed_target),
+                typ,
+            }),
+            span: node.span,
+        }
+    }
+
     fn check_expr(&mut self, expr: &Expression) -> TypedExpression {
         match expr {
             Expression::Binary(node) => self.check_expr_binary(node),
@@ -1479,6 +1496,7 @@ impl<'a> TypeChecker<'a> {
             Expression::Index(node) => self.check_expr_index(node),
             Expression::DataInit(node) => self.check_expr_data(node),
             Expression::FieldAccess(node) => self.check_expr_field(node),
+            Expression::TypeCast(node) => self.check_expr_cast(node),
             Expression::Broken(span) => self.broken_typed_expr(*span),
         }
     }
@@ -1580,6 +1598,7 @@ pub(crate) enum TypedExpressionKind {
     Index(TypedIndexExpressionNode),
     DataInit(TypedDataInitNode),
     FieldAccess(TypedFieldAccessNode),
+    Cast(TypedCastNode),
     Broken,
 }
 
@@ -1668,4 +1687,10 @@ pub(crate) struct TypedDataDecNode {
 pub(crate) struct TypedDataInitNode {
     pub name: IdentLiteralTuple,
     pub values: Vec<(IdentLiteralTuple, TypedExpression)>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TypedCastNode {
+    pub target: Box<TypedExpression>,
+    pub typ: Type,
 }

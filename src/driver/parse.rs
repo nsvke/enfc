@@ -979,6 +979,23 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_type_cast(&mut self, left: Expression) -> Expression {
+        let as_token = self.consume();
+        let target_type = match self.parse_type() {
+            Ok(node) => node,
+            Err(sync_stmt) => match sync_stmt {
+                Statement::Broken(broken) => return Expression::Broken(broken),
+                _ => unreachable!(),
+            },
+        };
+
+        Expression::TypeCast(TypeCastNode {
+            span: Span::new(left.get_span().start, target_type.span().end),
+            typ: target_type,
+            target: Box::new(left),
+        })
+    }
+
     fn parse_data_init(&mut self) -> Expression {
         let ident_token = self.consume();
         let ident_name = match &ident_token.kind {
@@ -1148,6 +1165,7 @@ impl<'a> Parser<'a> {
             OpenParam => self.parse_call(left),
             OpenBracket => self.parse_index(left),
             Dot => self.parse_field_access(left),
+            As => self.parse_type_cast(left),
             _ => self.parse_binary(left),
         }
     }
@@ -1585,7 +1603,7 @@ enum Precedence {
     Term,       // + -
     Factor,     // * / %
     Unary,      // ! - (also * &) (also ~)
-    Call,       // () [] .
+    Call,       // () [] . 'as'
     Primary,    // Literal Ident Grouping
 }
 impl Precedence {
@@ -1598,7 +1616,7 @@ impl Precedence {
             Lt | Gt | LtEq | GtEq => Self::Comparison,
             Plus | Minus => Self::Term,
             Star | Slash | Percent => Self::Factor,
-            OpenParam | Dot | OpenBracket => Self::Call,
+            OpenParam | Dot | As | OpenBracket => Self::Call,
             Tilde => Self::Unary,
             And => Self::BitwiseAnd,
             Or => Self::BitwiseOr,
@@ -1640,6 +1658,7 @@ pub(crate) enum Expression {
     Index(IndexExpressionNode),
     DataInit(DataInitNode),
     FieldAccess(FieldAccessNode),
+    TypeCast(TypeCastNode),
     Broken(Span),
 }
 impl fmt::Debug for Expression {
@@ -1656,6 +1675,7 @@ impl fmt::Debug for Expression {
             Self::Index(n) => n.fmt(f),
             Self::DataInit(n) => n.fmt(f),
             Self::FieldAccess(n) => n.fmt(f),
+            Self::TypeCast(n) => n.fmt(f),
             Self::Broken(span) => write!(
                 f,
                 "\x1b[38;2;255;170;0m{}\x1b[90m..\x1b[38;2;255;170;0m{}\x1b[0m \x1b[31mBrokenExpression!\x1b[0m",
@@ -1679,6 +1699,7 @@ impl Expression {
             Self::Index(x) => x.span,
             Self::DataInit(x) => x.span,
             Self::FieldAccess(x) => x.span,
+            Self::TypeCast(x) => x.span,
             Self::Broken(x) => *x,
         }
     }
@@ -1919,6 +1940,13 @@ pub(crate) struct ArrayLiteralNode {
 pub(crate) struct DataInitNode {
     pub name: IdentLiteralNode,
     pub values: Vec<(IdentLiteralNode, Expression)>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub(crate) struct TypeCastNode {
+    pub target: Box<Expression>,
+    pub typ: TypeNode,
     pub span: Span,
 }
 

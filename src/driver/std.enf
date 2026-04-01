@@ -1,0 +1,172 @@
+-- ENF STD START
+
+extern "stdio.h" {
+    fun print(s str, ..) nret;
+}
+extern "stdlib.h" {
+    fun std_env_arg_count() int;
+    fun std_env_get_arg(index int) str;
+    fun std_env_arg_is_ok(index int) bool;
+    fun std_env_exit(code int) nret;
+    fun realloc(ptr &nret, new_size int) &nret;
+    fun alloc(size int) &nret;
+}
+
+extern "sys/socket.h" {
+    fun std_net_socket() int;
+    fun std_net_bind(fd int, port int) int;
+    fun std_net_listen(fd int, max int) int;
+    fun std_net_accept(fd int) int;
+    fun std_net_recv(fd int, buffer &nret, size int) int;
+    fun std_net_send(fd int, buffer str, size int) int;
+    fun std_net_close(fd int) nret;
+}
+extern "netinet/in.h" {}
+extern "fcntl.h" {
+    fun std_fs_open(path str, mode int) int;
+}
+extern "unistd.h" {
+    fun std_fs_read(fd int, buf &nret, size int) int;
+    fun std_fs_write(fd int, buf str, size int) int;
+    fun std_fs_close(fd int) nret;
+}
+extern "sys/stat.h" {
+    fun std_fs_size(path str) int;
+}
+extern "string.h" {
+    fun std_str_len(s str) int;
+    fun std_str_cmp(s1 str, s2 str) bool;
+    fun std_str_find(s str, needle str) int;
+    fun std_mem_copy(dest &nret, src &nret, size int) nret;
+}
+
+
+inject %{
+// -- ENF STD ENV START --
+
+    int enf_env_argc;
+    char** enf_env_argv;
+
+    int std_env_arg_count() { return enf_env_argc; }
+    bool std_env_arg_is_ok(int index) {
+        if (index >= 0 && index < enf_env_argc) return true;
+        return false;
+    }
+    const char* std_env_get_arg(int index) {
+        if (index >= 0 && index < enf_env_argc) return enf_env_argv[index];
+        return "";
+    }
+    void std_env_exit(int code) {
+        exit(code);
+    }
+
+// -- ENF STD ENV END --
+
+// -- ENF STD IO START --
+
+#define print printf
+
+// -- ENF STD IO END --
+
+// -- ENF STD NET START
+
+    int std_net_socket() {
+        return socket(AF_INET, SOCK_STREAM, 0);
+    }
+
+    int std_net_bind(int fd, int port) {
+        struct sockaddr_in server_addr;
+
+        memset(&server_addr, 0, sizeof(server_addr));
+
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_addr.s_addr = INADDR_ANY;
+        server_addr.sin_port = htons(port);
+
+        return bind(fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    }
+
+    int std_net_listen(int fd, int max) {
+        return listen(fd, max);
+    }
+
+    int std_net_accept(int fd) {
+        // TODO delete nulls
+        return accept(fd, NULL, NULL);
+    }
+
+    int std_net_recv(int fd, void* buffer, int size) {
+        return recv(fd, buffer, size, 0);
+    }
+
+    int std_net_send(int fd, const char* buffer, int size) {
+        return send(fd, buffer, size, 0);
+    }
+
+    void std_net_close(int fd) {
+        close(fd);
+    }
+
+// -- ENF STD NET END
+
+// -- ENF STD MEM START
+
+#define alloc malloc
+
+    void std_mem_copy(void* dest, const void* src, int size) {
+        memcpy(dest, src, size);
+    }
+
+// -- ENF STD MEM END
+
+// -- ENF STD FS START
+
+    int std_fs_open(const char* path, int mode) {
+        if (mode == 0) return open(path, O_RDONLY);
+        if (mode == 1) return open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        return -1;
+    }
+
+    int std_fs_read(int fd, void* buf, int size) {
+        return read(fd, buf, size);
+    }
+
+    int std_fs_write(int fd, const void* buf, int size) {
+        return write(fd, buf, size);
+    }
+
+    void std_fs_close(int fd) {
+        close(fd);
+    }
+
+    int std_fs_size(const char* path) {
+        struct stat st;
+        if (stat(path, &st) == 0) return st.st_size;
+        return -1;
+    }
+
+// -- ENF STD FS END
+
+// -- ENF STD STR START
+
+    int std_str_len(const char* s) {
+        return strlen(s);
+    }
+
+    int std_str_cmp(const char* s1, const char* s2) {
+        return strcmp(s1, s2) == 0 ? 1 : 0;
+    }
+
+    int std_str_find(const char* haystack, const char* needle) {
+        char* ptr = strstr(haystack, needle);
+        if (ptr) {
+            return (int)(ptr - haystack);
+        }
+        return -1;
+    }
+
+// -- ENF STD STR END
+
+}%
+
+-- ENF STD END

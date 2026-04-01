@@ -340,6 +340,11 @@ impl<'a> CCodeGen<'a> {
                     let full = format!("(struct enf_data_{}){{ {} }}", id, values_joined);
                     self.stack.push(full);
                 }
+                Instruction::Cast(typ) => {
+                    let target_expr = self.stack_pop();
+                    self.stack
+                        .push(format!("(({})({}))", typ.as_c_type(), target_expr));
+                }
                 Instruction::Discard => {
                     let val = self.stack_pop();
                     output.push_str(&format!("{};\n", val));

@@ -1,3 +1,5 @@
+compile_flag "no_std";
+
 inject %{
     int calculate_circle_area_approx(int radius) {
         float pi = 3.14159f;

@@ -21,14 +21,18 @@ pub use irgen::IrProgram;
 pub use lex::{Token, TokenKind};
 pub use typecheck::TypeKind;
 
+const STD_PRELUDE: &str = include_str!("driver/std.enf");
+
 pub struct Driver {
     packet: Packet,
+    inject_std: bool,
 }
 
 impl Driver {
     pub fn new(config: Config) -> Self {
         Self {
             packet: Packet::new(Diagnostics::new(config)),
+            inject_std: true,
         }
     }
 
@@ -40,6 +44,18 @@ impl Driver {
     }
 
     pub fn run(&mut self) {
+        let no_std_flag = "compile_flag \"no_std\";";
+        let src = self.packet.diagnostics.source_code_mut();
+
+        if src.trim_start().starts_with(no_std_flag) {
+            self.inject_std = false;
+            *src = src.replacen(no_std_flag, "", 1);
+        }
+
+        if self.inject_std {
+            *src = format!("{}\n{}", STD_PRELUDE, src);
+        }
+
         let lexer = Lexer::new(self.diagnose().source_code().char_indices().peekable());
         let tokens = lexer.tokenize();
         println!("------------------------------------------------------------------------------");

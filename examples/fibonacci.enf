@@ -1,3 +1,5 @@
+compile_flag "no_std";
+
 extern fun putchar(i int) int;
 
 fun fibonacci(n int) int {
