@@ -33,11 +33,7 @@ pub mod fmt_miette_impl {
     impl<'a> Diagnostic for MietteAdapter<'a> {
         fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
             let span = self.error.span();
-            let len = if span.end >= span.start {
-                span.end - span.start
-            } else {
-                0
-            };
+            let len = span.end.saturating_sub(span.start);
 
             let label_text = match &self.error {
                 CompileError::Parsing(ParsingError::UnexpectedToken { .. }) => {
@@ -357,7 +353,7 @@ pub mod fmt_miette_impl {
 
             let mut buffer = String::new();
 
-            if let Err(_) = handler.render_report(&mut buffer, &adapter) {
+            if handler.render_report(&mut buffer, &adapter).is_err() {
                 eprintln!("Error rendering report.");
                 return;
             }

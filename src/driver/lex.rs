@@ -431,14 +431,12 @@ impl<'a> Lexer<'a> {
                 if sym == TokenKind::Dot {
                     let is_all_digits = !self.buffer.chars.is_empty()
                         && self.buffer.chars.chars().all(|ch| ch.is_ascii_digit());
-                    if is_all_digits {
-                        if let Some((_, next_c)) = self.iter.peek() {
-                            if next_c.is_ascii_digit() {
+                    if is_all_digits
+                        && let Some((_, next_c)) = self.iter.peek()
+                            && next_c.is_ascii_digit() {
                                 self.buffer.chars.push(c);
                                 continue;
                             }
-                        }
-                    }
                 }
                 // FLOAT PATCH END
                 self.push_ident_token(off);

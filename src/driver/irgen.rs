@@ -308,7 +308,7 @@ impl IrGenerator {
 
     fn gen_from_stmt_val(&mut self, node: &TypedVarDecNode) {
         match &node.initializer {
-            Some(initializer) => self.gen_from_expr(&initializer),
+            Some(initializer) => self.gen_from_expr(initializer),
             None => match &node.var_type.kind {
                 TypeKind::Int => self.emit(Instruction::PushInt(0)),
                 TypeKind::Float => self.emit(Instruction::PushFloat(0.0)),
@@ -575,6 +575,7 @@ impl IrGenerator {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Pool {
     item_map: HashMap<String, usize>,
     item_vec: Vec<String>,
@@ -614,6 +615,7 @@ impl Pool {
     }
 }
 
+#[derive(Debug)]
 pub struct IrProgram {
     instructions: Vec<Instruction>,
     str_pool: Pool,

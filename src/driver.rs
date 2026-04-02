@@ -58,79 +58,26 @@ impl Driver {
 
         let lexer = Lexer::new(self.diagnose().source_code().char_indices().peekable());
         let tokens = lexer.tokenize();
-        println!("------------------------------------------------------------------------------");
-        println!("Token List");
-        println!("------------------------------------------------------------------------------");
-        tokens.iter().for_each(|t| {
-            println!("{:?}", *t);
-            println!(
-                "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
-            );
-        });
 
         let parser = Parser::new(&tokens, self.diagnose_mut());
         let statements = parser.parse();
-        println!("------------------------------------------------------------------------------");
-        println!("Statement List");
-        println!("------------------------------------------------------------------------------");
-        statements.iter().for_each(|t| {
-            println!("{:?}", *t);
-            println!(
-                "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
-            );
-        });
         self.packet.load_tokens(tokens);
 
         let typechecker = TypeChecker::new(self.diagnose_mut());
         let typed_statements = typechecker.check(&statements);
-        println!("------------------------------------------------------------------------------");
-        println!("TypedStatement List");
-        println!("------------------------------------------------------------------------------");
-        typed_statements.iter().for_each(|t| {
-            println!("{:?}", *t);
-            println!(
-                "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
-            );
-        });
         self.packet.load_asts(statements);
 
-        //println!("------------------------------------------------------------------------------");
         if self.diagnose().has_errors() {
-            println!(
-                "\x1b[31m------------------------------------------------------------------------------"
-            );
-            println!("Errors");
-            println!(
-                "------------------------------------------------------------------------------\x1b[0m"
-            );
-            self.diagnose().print_errors();
-            println!("{} errors occured.", self.diagnose().errors_len());
             return;
         }
 
         let irgen = IrGenerator::new();
         let ir = irgen.generate_from(&typed_statements);
-        println!("------------------------------------------------------------------------------");
-        println!("IR List");
-        println!("------------------------------------------------------------------------------");
-        ir.instructions().iter().enumerate().for_each(|(i,t)| {
-            println!("{}: {:?}", i,*t);
-            println!(
-                "\x1b[90m------------------------------------------------------------------------------\x1b[0m"
-            );
-        });
         self.packet.load_tasts(typed_statements);
 
         let output = CodeGen::compile(&ir);
-        println!("------------------------------------------------------------------------------");
-        println!("C Code");
-        println!("------------------------------------------------------------------------------");
-        if let CompileOutput::SourceCode(c_code) = &output {
-            println!("{}", c_code);
-        }
-
         self.packet.load_ir(ir);
-        self.packet.load_output(output.into());
+        self.packet.load_output(output);
     }
 
     pub fn result(self) -> Packet {
@@ -172,6 +119,18 @@ impl Packet {
     }
     fn load_output(&mut self, output: CompileOutput) {
         self.output = Some(output)
+    }
+    pub fn print_tokens(&self) {
+        println!("=== TOKENS ===\n{:#?}", self.tokens);
+    }
+    pub fn print_ast(&self) {
+        println!("=== AST ===\n{:#?}", self.asts);
+    }
+    pub fn print_tast(&self) {
+        println!("=== TYPED AST ===\n{:#?}", self.tasts);
+    }
+    pub fn print_ir(&self) {
+        println!("=== IR COMMANDS ===\n{:#?}", self.ir);
     }
 }
 

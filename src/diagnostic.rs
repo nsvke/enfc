@@ -27,11 +27,9 @@ impl Diagnostics {
             return;
         }
 
-        //println!("{} errors occured!", self.errors.len());
-
         for err in &self.errors {
             self.formatter
-                .print(err, self.source_code(), &self.src_path());
+                .print(err, self.source_code(), self.src_path());
         }
     }
 

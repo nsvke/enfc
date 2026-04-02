@@ -170,9 +170,7 @@ impl<'a> Parser<'a> {
             span: name_token.span,
         };
 
-        if let Err(broken) = self.expect(OpenParam) {
-            return Err(broken);
-        }
+        self.expect(OpenParam)?;
 
         let mut is_variadic = false;
         let mut parameters = Vec::new();
@@ -217,9 +215,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if let Err(broken) = self.expect(CloseParam) {
-            return Err(broken);
-        }
+        self.expect(CloseParam)?;
 
         let type_node = match self.parse_type() {
             Ok(typ) => typ,
@@ -227,9 +223,7 @@ impl<'a> Parser<'a> {
             Err(_) => unreachable!(),
         };
 
-        if let Err(broken) = self.expect(Semi) {
-            return Err(broken);
-        }
+        self.expect(Semi)?;
 
         Ok(ExternSignatureNode {
             span: Span {
@@ -930,7 +924,7 @@ impl<'a> Parser<'a> {
             ));
             return Statement::Broken(result.get_span()); // to prevent duplicate errors
         }
-        return Statement::ExpressionStatement(result);
+        Statement::ExpressionStatement(result)
     }
 
     fn parse_expr(&mut self) -> Expression {
