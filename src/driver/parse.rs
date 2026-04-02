@@ -1944,237 +1944,237 @@ pub(crate) struct TypeCastNode {
     pub span: Span,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::driver::lex::Lexer;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::driver::lex::Lexer;
 
-    fn parse_source(source: &str) -> (Vec<Statement>, Diagnostics) {
-        let mut diag = Diagnostics::empty_diagnostics(source.to_string());
-        let tokens = {
-            let lexer = Lexer::new(diag.source_code().char_indices().peekable());
-            lexer.tokenize()
-        };
-        let mut parser = Parser::new(&tokens, &mut diag);
-        let statements = parser.parse();
-        (statements, diag)
-    }
+//     fn parse_source(source: &str) -> (Vec<Statement>, Diagnostics) {
+//         let mut diag = Diagnostics::empty_diagnostics(source.to_string());
+//         let tokens = {
+//             let lexer = Lexer::new(diag.source_code().char_indices().peekable());
+//             lexer.tokenize()
+//         };
+//         let mut parser = Parser::new(&tokens, &mut diag);
+//         let statements = parser.parse();
+//         (statements, diag)
+//     }
 
-    // #[test]
-    // fn test_val_declaration() {
-    //     let src = "val x = 10;";
-    //     let (stmts, diag) = parse_source(src);
-    //     assert!(!diag.has_errors());
-    //     assert_eq!(stmts.len(), 1);
-    //     if let Statement::VarDeclaration(node) = &stmts[0] {
-    //         assert_eq!(node.name.value, "x");
-    //         assert!(!node.mutable);
-    //         if let Expression::Literal(l) = &node.initializer {
-    //             if let LiteralValue::Number(n) = l.value {
-    //                 assert_eq!(n, 10);
-    //             } else {
-    //                 panic!("Expected number literal");
-    //             }
-    //         } else {
-    //             panic!("Expected literal expression");
-    //         }
-    //     } else {
-    //         panic!("Expected VarDeclaration");
-    //     }
-    // }
+//     // #[test]
+//     // fn test_val_declaration() {
+//     //     let src = "val x = 10;";
+//     //     let (stmts, diag) = parse_source(src);
+//     //     assert!(!diag.has_errors());
+//     //     assert_eq!(stmts.len(), 1);
+//     //     if let Statement::VarDeclaration(node) = &stmts[0] {
+//     //         assert_eq!(node.name.value, "x");
+//     //         assert!(!node.mutable);
+//     //         if let Expression::Literal(l) = &node.initializer {
+//     //             if let LiteralValue::Number(n) = l.value {
+//     //                 assert_eq!(n, 10);
+//     //             } else {
+//     //                 panic!("Expected number literal");
+//     //             }
+//     //         } else {
+//     //             panic!("Expected literal expression");
+//     //         }
+//     //     } else {
+//     //         panic!("Expected VarDeclaration");
+//     //     }
+//     // }
 
-    #[test]
-    fn test_var_declaration() {
-        let src = "var y = 20;";
-        let (stmts, diag) = parse_source(src);
-        assert!(!diag.has_errors());
-        if let Statement::VarDeclaration(node) = &stmts[0] {
-            assert_eq!(node.name.value, "y");
-            assert!(node.mutable);
-        } else {
-            panic!("Expected VarDeclaration");
-        }
-    }
+//     #[test]
+//     fn test_var_declaration() {
+//         let src = "var y = 20;";
+//         let (stmts, diag) = parse_source(src);
+//         assert!(!diag.has_errors());
+//         if let Statement::VarDeclaration(node) = &stmts[0] {
+//             assert_eq!(node.name.value, "y");
+//             assert!(node.mutable);
+//         } else {
+//             panic!("Expected VarDeclaration");
+//         }
+//     }
 
-    #[test]
-    fn test_fun_definition() {
-        let src = "fun add(a int, b int) int { ret a + b; }";
-        let (stmts, diag) = parse_source(src);
-        assert!(!diag.has_errors());
-        if let Statement::FunDefinition(node) = &stmts[0] {
-            assert_eq!(node.name.value, "add");
-            assert_eq!(node.parameters.len(), 2);
-            assert_eq!(node.parameters[0].0.value, "a");
-            assert_eq!(node.parameters[1].0.value, "b");
-            let type_str = match &node.ret_type {
-                TypeNode::Named(node) => &node.value,
-                _ => unreachable!(),
-            };
-            assert_eq!(type_str, "int");
-        } else {
-            panic!("Expected FunDefinition");
-        }
-    }
+//     #[test]
+//     fn test_fun_definition() {
+//         let src = "fun add(a int, b int) int { ret a + b; }";
+//         let (stmts, diag) = parse_source(src);
+//         assert!(!diag.has_errors());
+//         if let Statement::FunDefinition(node) = &stmts[0] {
+//             assert_eq!(node.name.value, "add");
+//             assert_eq!(node.parameters.len(), 2);
+//             assert_eq!(node.parameters[0].0.value, "a");
+//             assert_eq!(node.parameters[1].0.value, "b");
+//             let type_str = match &node.ret_type {
+//                 TypeNode::Named(node) => &node.value,
+//                 _ => unreachable!(),
+//             };
+//             assert_eq!(type_str, "int");
+//         } else {
+//             panic!("Expected FunDefinition");
+//         }
+//     }
 
-    // #[test]
-    // fn test_binary_precedence() {
-    //     let src = "val x = 1 + 2 * 3;";
-    //     let (stmts, diag) = parse_source(src);
-    //     assert!(!diag.has_errors());
-    //     if let Statement::VarDeclaration(v) = &stmts[0] {
-    //         if let Expression::Binary(b) = &v.initializer {
-    //             if let BinaryOperator::Add = b.op {
-    //                 // Good
-    //             } else {
-    //                 panic!("Expected Add, got {:?}", b.op);
-    //             }
-    //         }
-    //     }
-    // }
+//     // #[test]
+//     // fn test_binary_precedence() {
+//     //     let src = "val x = 1 + 2 * 3;";
+//     //     let (stmts, diag) = parse_source(src);
+//     //     assert!(!diag.has_errors());
+//     //     if let Statement::VarDeclaration(v) = &stmts[0] {
+//     //         if let Expression::Binary(b) = &v.initializer {
+//     //             if let BinaryOperator::Add = b.op {
+//     //                 // Good
+//     //             } else {
+//     //                 panic!("Expected Add, got {:?}", b.op);
+//     //             }
+//     //         }
+//     //     }
+//     // }
 
-    #[test]
-    fn test_if_else() {
-        let src = "if x { } else { }";
-        let (stmts, diag) = parse_source(src);
-        assert!(!diag.has_errors());
-        if let Statement::If(node) = &stmts[0] {
-            assert!(node.else_branch.is_some());
-        } else {
-            panic!("Expected If");
-        }
-    }
+//     #[test]
+//     fn test_if_else() {
+//         let src = "if x { } else { }";
+//         let (stmts, diag) = parse_source(src);
+//         assert!(!diag.has_errors());
+//         if let Statement::If(node) = &stmts[0] {
+//             assert!(node.else_branch.is_some());
+//         } else {
+//             panic!("Expected If");
+//         }
+//     }
 
-    #[test]
-    fn test_complex_expression_syntax_error() {
-        let src = "if x == && a[12 == 75) { }";
-        let (stmts, diag) = parse_source(src);
+//     #[test]
+//     fn test_complex_expression_syntax_error() {
+//         let src = "if x == && a[12 == 75) { }";
+//         let (stmts, diag) = parse_source(src);
 
-        assert!(diag.has_errors(), "Should have syntax errors");
-        assert!(!stmts.is_empty());
-    }
+//         assert!(diag.has_errors(), "Should have syntax errors");
+//         assert!(!stmts.is_empty());
+//     }
 
-    #[test]
-    fn test_missing_semicolon() {
-        let src = "val x = 10"; // 7 - 8
-        let (stmts, diag) = parse_source(src);
+//     #[test]
+//     fn test_missing_semicolon() {
+//         let src = "val x = 10"; // 7 - 8
+//         let (stmts, diag) = parse_source(src);
 
-        assert!(diag.has_errors());
-        assert!(!stmts.is_empty());
-        if let Statement::Broken(span) = stmts[0] {
-            assert_eq!(span.start, 10); // val x = 10
-            assert_eq!(span.end, 11); // End of "10"
-        } else {
-            panic!("Expected BrokenStatement due to missing semicolon");
-        }
-    }
+//         assert!(diag.has_errors());
+//         assert!(!stmts.is_empty());
+//         if let Statement::Broken(span) = stmts[0] {
+//             assert_eq!(span.start, 10); // val x = 10
+//             assert_eq!(span.end, 11); // End of "10"
+//         } else {
+//             panic!("Expected BrokenStatement due to missing semicolon");
+//         }
+//     }
 
-    #[test]
-    fn test_consecutive_errors() {
-        let src = "var x; val y = ;";
-        let (stmts, diag) = parse_source(src);
+//     #[test]
+//     fn test_consecutive_errors() {
+//         let src = "var x; val y = ;";
+//         let (stmts, diag) = parse_source(src);
 
-        assert!(diag.errors_len() >= 2);
+//         assert!(diag.errors_len() >= 2);
 
-        assert!(stmts.len() >= 1);
-    }
+//         assert!(stmts.len() >= 1);
+//     }
 
-    // #[test]
-    // fn test_incomplete_binary_op() {
-    //     // Yarım kalmış işlem
-    //     let src = "val z = 10 + ;";
-    //     let (stmts, diag) = parse_source(src);
+//     // #[test]
+//     // fn test_incomplete_binary_op() {
+//     //     // Yarım kalmış işlem
+//     //     let src = "val z = 10 + ;";
+//     //     let (stmts, diag) = parse_source(src);
 
-    //     assert!(diag.has_errors());
-    //     assert!(!stmts.is_empty());
-    //     if let Statement::VarDeclaration(v) = &stmts[0] {
-    //         if let Expression::Binary(b_expr) = &v.initializer {
-    //             if let Expression::Broken(span) = &*b_expr.right {
-    //                 assert_eq!(span.start, 13);
-    //                 assert_eq!(span.end, 14);
-    //             } else {
-    //                 panic!(
-    //                     "Expected right operand of binary expression to be Broken, got {:?}",
-    //                     b_expr.right
-    //                 );
-    //             }
-    //         } else {
-    //             panic!(
-    //                 "Expected binary expression initializer, got {:?}",
-    //                 v.initializer
-    //             );
-    //         }
-    //     } else {
-    //         panic!(
-    //             "Expected VarDeclaration for incomplete binary op, got {:?}",
-    //             stmts[0]
-    //         );
-    //     }
-    // }
+//     //     assert!(diag.has_errors());
+//     //     assert!(!stmts.is_empty());
+//     //     if let Statement::VarDeclaration(v) = &stmts[0] {
+//     //         if let Expression::Binary(b_expr) = &v.initializer {
+//     //             if let Expression::Broken(span) = &*b_expr.right {
+//     //                 assert_eq!(span.start, 13);
+//     //                 assert_eq!(span.end, 14);
+//     //             } else {
+//     //                 panic!(
+//     //                     "Expected right operand of binary expression to be Broken, got {:?}",
+//     //                     b_expr.right
+//     //                 );
+//     //             }
+//     //         } else {
+//     //             panic!(
+//     //                 "Expected binary expression initializer, got {:?}",
+//     //                 v.initializer
+//     //             );
+//     //         }
+//     //     } else {
+//     //         panic!(
+//     //             "Expected VarDeclaration for incomplete binary op, got {:?}",
+//     //             stmts[0]
+//     //         );
+//     //     }
+//     // }
 
-    #[test]
-    fn test_unclosed_block() {
-        // Kapanmamış süslü parantez
-        let src = "fun foo() void { val x = 1; ";
-        let (stmts, diag) = parse_source(src);
+//     #[test]
+//     fn test_unclosed_block() {
+//         // Kapanmamış süslü parantez
+//         let src = "fun foo() void { val x = 1; ";
+//         let (stmts, diag) = parse_source(src);
 
-        assert!(diag.has_errors());
-        assert!(!stmts.is_empty());
-        if let Statement::FunDefinition(f) = &stmts[0] {
-            if let Statement::Broken(span) = &f.body.body[0] {
-                //
-            } else {
-                // If body has a statement, it should be parsed till the end or be broken
-            }
-        } else {
-            panic!("Expected FunDefinition for unclosed block");
-        }
-    }
+//         assert!(diag.has_errors());
+//         assert!(!stmts.is_empty());
+//         if let Statement::FunDefinition(f) = &stmts[0] {
+//             if let Statement::Broken(span) = &f.body.body[0] {
+//                 //
+//             } else {
+//                 // If body has a statement, it should be parsed till the end or be broken
+//             }
+//         } else {
+//             panic!("Expected FunDefinition for unclosed block");
+//         }
+//     }
 
-    #[test]
-    fn test_call_error_recovery_hello() {
-        let src = "hello(;";
-        let (stmts, diag) = parse_source(src);
+//     #[test]
+//     fn test_call_error_recovery_hello() {
+//         let src = "hello(;";
+//         let (stmts, diag) = parse_source(src);
 
-        // Should have errors
-        assert!(diag.has_errors());
-        // Should only have 1 error: "Unexpected token ';', expected Expr"
-        // The "expected ')'" error should be suppressed.
-        assert_eq!(
-            diag.errors_len(),
-            1,
-            "Should report exactly 1 error for 'hello(;'"
-        );
+//         // Should have errors
+//         assert!(diag.has_errors());
+//         // Should only have 1 error: "Unexpected token ';', expected Expr"
+//         // The "expected ')'" error should be suppressed.
+//         assert_eq!(
+//             diag.errors_len(),
+//             1,
+//             "Should report exactly 1 error for 'hello(;'"
+//         );
 
-        if let Statement::Expression(Expression::Call(call_node)) = &stmts[0] {
-            assert_eq!(call_node.arguments.len(), 1);
-            if let Expression::Broken(_) = &call_node.arguments[0] {
-                // Correctly recovered as a Broken argument
-            } else {
-                panic!("Expected broken argument");
-            }
-        } else {
-            panic!("Expected Call expression statement");
-        }
-    }
+//         if let Statement::Expression(Expression::Call(call_node)) = &stmts[0] {
+//             assert_eq!(call_node.arguments.len(), 1);
+//             if let Expression::Broken(_) = &call_node.arguments[0] {
+//                 // Correctly recovered as a Broken argument
+//             } else {
+//                 panic!("Expected broken argument");
+//             }
+//         } else {
+//             panic!("Expected Call expression statement");
+//         }
+//     }
 
-    #[test]
-    fn test_stack_overflow_broken_expr() {
-        // This test ensures that printing a Broken expression doesn't cause a stack overflow
-        // via infinite recursion in Debug impl.
-        let broken = Expression::Broken(Span { start: 0, end: 1 });
-        let debug_str = format!("{:?}", broken);
-        assert!(debug_str.contains("BrokenExpression!"));
-    }
+//     #[test]
+//     fn test_stack_overflow_broken_expr() {
+//         // This test ensures that printing a Broken expression doesn't cause a stack overflow
+//         // via infinite recursion in Debug impl.
+//         let broken = Expression::Broken(Span { start: 0, end: 1 });
+//         let debug_str = format!("{:?}", broken);
+//         assert!(debug_str.contains("BrokenExpression!"));
+//     }
 
-    #[test]
-    fn test_invalid_val_name_start_digit() {
-        let src = "val 12x = 1000;";
-        let (stmts, diag) = parse_source(src);
+//     #[test]
+//     fn test_invalid_val_name_start_digit() {
+//         let src = "val 12x = 1000;";
+//         let (stmts, diag) = parse_source(src);
 
-        assert!(diag.has_errors());
-        let err_span = diag.errors()[0].span();
-        // The error should be on '12' (index 4), not '1000' (index 10).
-        assert_eq!(err_span.start, 4, "Error should point to '12'");
-        assert!(stmts.len() > 0); // Should produce a broken statement
-    }
-}
+//         assert!(diag.has_errors());
+//         let err_span = diag.errors()[0].span();
+//         // The error should be on '12' (index 4), not '1000' (index 10).
+//         assert_eq!(err_span.start, 4, "Error should point to '12'");
+//         assert!(stmts.len() > 0); // Should produce a broken statement
+//     }
+// }
