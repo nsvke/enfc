@@ -1,0 +1,35 @@
+fun main() int {
+    val fd = std_net_socket();
+    if fd < 0 {
+        print("error: the client socket could not be created.\n");
+        ret 1;
+    }
+
+    val ip = "127.0.0.1"; 
+    val port = 8080;
+
+    print("connecting the server...\n");
+    val conn_res = std_net_connect(fd, ip, port);
+    
+    if conn_res < 0 {
+        print("error: could not connect to the server.\n");
+        ret 1;
+    }
+
+    val request = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    std_net_send(fd, request, std_str_len(request));
+    print("a request has been sent. waiting for response...\n");
+
+    val buffer_size = 4096;
+    val buffer = std_mem_alloc(buffer_size);
+    
+    val bytes_read = std_net_recv(fd, buffer, buffer_size);
+    if bytes_read > 0 {
+        print("Request bytes: %d\n", bytes_read);
+        
+        print("Request content:\n---\n%s\n---\n", buffer as str);
+    }
+
+    std_net_close(fd);
+    ret 0;
+}

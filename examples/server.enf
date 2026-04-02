@@ -1,0 +1,51 @@
+fun main() int {
+    print("the server is being started on port 8080...\n");
+
+    val server_fd = std_net_socket();
+    if server_fd < 0 {
+        print("error: the server socket could not be created.\n");
+        ret 1;
+    }
+
+    val bind_res = std_net_bind(server_fd, 8080);
+    if bind_res < 0 {
+        print("error: port 8080 is not available.\n");
+        ret 1;
+    }
+
+    val listen_res = std_net_listen(server_fd, 10);
+    if listen_res < 0 {
+        print("error: an error occured while listening..\n");
+        ret 1;
+    }
+
+    print("Listening.. --> go 'http://localhost:8080' or run client.enf\n");
+
+    val response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<h1>hello!</h1>";
+    val response_len = std_str_len(response);
+
+    val buffer_size = 2048;
+
+    whl 1 == 1 {
+        val client_fd = std_net_accept(server_fd);
+        
+        if client_fd >= 0 {
+            print("New request!!\n");
+
+            val buffer = std_mem_alloc(buffer_size); 
+            
+            val bytes_read = std_net_recv(client_fd, buffer, buffer_size);
+            
+            if bytes_read > 0 {
+                std_net_send(client_fd, response, response_len);
+            }
+
+            std_net_close(client_fd);
+
+
+            std_mem_free(buffer);
+        }
+    }
+
+    ret 0;
+}

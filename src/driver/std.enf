@@ -9,7 +9,8 @@ extern "stdlib.h" {
     fun std_env_arg_is_ok(index int) bool;
     fun std_env_exit(code int) nret;
     fun realloc(ptr &nret, new_size int) &nret;
-    fun alloc(size int) &nret;
+    fun std_mem_alloc(size int) &nret;
+    fun std_mem_free(ptr &nret) nret;
 }
 
 extern "sys/socket.h" {
@@ -20,6 +21,9 @@ extern "sys/socket.h" {
     fun std_net_recv(fd int, buffer &nret, size int) int;
     fun std_net_send(fd int, buffer str, size int) int;
     fun std_net_close(fd int) nret;
+}
+extern "arpa/inet.h" {
+    fun std_net_connect(fd int, ip str, port int) int;
 }
 extern "netinet/in.h" {}
 extern "fcntl.h" {
@@ -107,12 +111,21 @@ inject %{
         close(fd);
     }
 
+    int std_net_connect(int fd, const char* ip, int port) {
+        struct sockaddr_in server_addr;
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(port);
+        inet_pton(AF_INET, ip, &server_addr.sin_addr);
+        return connect(fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    }
+
 // -- ENF STD NET END
 
 // -- ENF STD MEM START
 
-#define alloc malloc
-
+#define std_mem_alloc malloc
+#define std_mem_free free
     void std_mem_copy(void* dest, const void* src, int size) {
         memcpy(dest, src, size);
     }

@@ -29,6 +29,11 @@ fn main() -> Result<()> {
         packet.print_ir();
     }
 
+    if packet.diagnostics.has_errors() {
+        packet.diagnostics.print_errors();
+        std::process::exit(1);
+    }
+
     let code = match packet.output {
         Some(out) => match out {
             SourceCode(s) => s,
@@ -36,11 +41,6 @@ fn main() -> Result<()> {
         },
         None => std::process::exit(1),
     };
-
-    if packet.diagnostics.has_errors() {
-        packet.diagnostics.print_errors();
-        std::process::exit(1);
-    }
 
     let out_file_name = packet.diagnostics.config.output_path;
     let mut file_name = out_file_name.clone();
