@@ -1,45 +1,57 @@
 # ENFC: A Statically Typed Compiler Implementation in Rust
 
-ENFC is an experimental, statically typed, imperative programming language compiler. The project serves as a comprehensive study into modern compiler architecture, focusing on building every stage of the compilation pipeline—from lexical analysis to code generation—without the use of parser generators or high-level DSLs.
+enfc is a experimental statically-typed, ahead-of-time (AOT) compiled systems programming language. It is designed to be minimal, predictable, and capable of direct C-FFI and POSIX syscall integrations.
 
-## Architectural Overview
-
-### Frontend
-
-- **Lexical Analysis:** A custom, iterator-based tokenizer designed for precision and clarity in error reporting.
-- **Parsing:** A hand-written recursive descent parser. It employs **Pratt Parsing** for expression precedence and implements robust **error recovery** mechanisms to provide multiple diagnostic messages in a single pass.
-- **Abstract Syntax Tree (AST):** A structured representation of the program's imperative constructs, currently supporting variable/function declarations, control flow (if/while), and nested scopes.
-
-### Diagnostics
-
-- **Error Infrastructure:** Integrated diagnostic reporting using `miette`. The compiler provides rich, span-aware error messages with source code snippets to facilitate debugging of the source language.
-
-### Middle-end (Completed)
-
-- **Semantic Analysis & Type Checking:** A static type checker that transforms the raw AST into a Typed AST.
-- **Intermediate Representation Generation:** A custom stack based IR.
-
-## Backend (Development in Progress)
-
-- **C Transpilation:** Currently implementing a compiler backend that consumes the IR. It simulates a virtual stack at compile-time to translate IR instructions into equivalent, highly optimized, native C statements and expressions.
-
-## Roadmap and Future Goals
-
-- **FFI Support**
-- **WARN diagnostic**
-- **Advanced Types:** Structs, enums, arrays, and pointer semantics.
+Currently, enfc compiles to C as an Intermediate Representation (IR) and leverages system compilers (gcc/clang) to generate native binaries.
 
 ## Build and Usage
+
+You can directly run enfc in a reproducible, isolated environment using Nix:
+
+```bash
+# Run a specific .enf file directly
+nix run github:nsvke/enfc -- source.enf
+
+# Or enter a pure development shell with all dependencies
+nix develop
+```
+
+If you prefer building from source using standard Rust tooling:
 
 ```bash
 # Clone the repository
 git clone https://github.com/nsvke/enfc
+cd enfc
+cargo build --release
 
-# Run the compiler on a source file
-cargo run -- -s <path_to_source_file>
+# The binary will be available at target/release/enfc
+./target/release/enfc main.enf
+```
 
-# Execute the test suite
-cargo test
+## Quick Example: TCP Server
+
+Here is a minimal HTTP/TCP server written in enf:
+
+```enf
+fun main() int {
+    print("Starting server on port 8080...\n");
+    val server_fd = std_net_socket();
+
+    std_net_bind(server_fd, 8080);
+    std_net_listen(server_fd, 10);
+
+    val response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nHello from enfc!";
+    val response_len = std_str_len(response);
+
+    whl true {
+        val client_fd = std_net_accept(server_fd);
+        if client_fd >= 0 {
+            std_net_send(client_fd, response, response_len);
+            std_net_close(client_fd);
+        }
+    }
+    ret 0;
+}
 ```
 
 ## 📝 License

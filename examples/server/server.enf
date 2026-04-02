@@ -26,16 +26,16 @@ fun main() int {
 
     val buffer_size = 2048;
 
-    whl 1 == 1 {
+    whl true {
         val client_fd = std_net_accept(server_fd);
-        
+
         if client_fd >= 0 {
             print("New request!!\n");
 
-            val buffer = std_mem_alloc(buffer_size); 
-            
+            val buffer = std_mem_alloc(buffer_size);
+
             val bytes_read = std_net_recv(client_fd, buffer, buffer_size);
-            
+
             if bytes_read > 0 {
                 std_net_send(client_fd, response, response_len);
             }
